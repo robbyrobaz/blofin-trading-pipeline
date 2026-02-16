@@ -1,0 +1,25 @@
+{
+  "features": [
+    "momentum_roc",
+    "momentum_rsi",
+    "trend_ema_diff",
+    "trend_macd",
+    "volume_obv",
+    "volume_mfi",
+    "close",
+    "high",
+    "low",
+    "volume"
+  ],
+  "hyperparams": {
+    "hidden_layers": [
+      128,
+      64,
+      32
+    ],
+    "dropout": 0.2,
+    "learning_rate": 0.001,
+    "epochs": 50,
+    "batch_size": 32
+  }
+}

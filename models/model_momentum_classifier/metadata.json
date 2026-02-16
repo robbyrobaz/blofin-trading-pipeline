@@ -1,0 +1,24 @@
+{
+  "created_at": null,
+  "trained_at": "2026-02-16T16:00:32.520631",
+  "performance": {
+    "train_accuracy": 0.97875,
+    "test_accuracy": 0.935,
+    "f1_score": 0.9143827052653575,
+    "precision": 0.9306592284120375,
+    "recall": 0.9039925937516298,
+    "class_accuracies": {
+      "decelerating": 0.9879518072289156,
+      "neutral": 0.75,
+      "accelerating": 0.974025974025974
+    },
+    "n_samples": 1000,
+    "class_distribution": {
+      "decelerating": 413,
+      "neutral": 200,
+      "accelerating": 387
+    }
+  },
+  "feature_importance": {},
+  "saved_at": "2026-02-16T16:00:32.525220"
+}

@@ -1,0 +1,24 @@
+{
+  "created_at": null,
+  "trained_at": "2026-02-16T16:00:32.786231",
+  "performance": {
+    "train_accuracy": 0.9599773473965659,
+    "test_accuracy": 0.8077048035117333,
+    "train_r2": 0.9599773473965659,
+    "test_r2": 0.8077048035117333,
+    "test_mae": 0.08035249098124098,
+    "test_rmse": 0.21921352513569467,
+    "n_samples": 1000
+  },
+  "feature_importance": {
+    "volatility_std": 0.93133300333513,
+    "volatility_parkinson": 0.011428178330319925,
+    "atr_14": 0.009483268307574214,
+    "max_drawdown": 0.009519416601967605,
+    "drawdown_duration": 0.011431280311254018,
+    "sharpe_ratio": 0.00728719904177474,
+    "volume_volatility": 0.011871331569405253,
+    "price_range": 0.007646322502574156
+  },
+  "saved_at": "2026-02-16T16:00:32.789710"
+}

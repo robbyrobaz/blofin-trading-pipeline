@@ -1,0 +1,15 @@
+[Unit]
+Description=Blofin Stack Daily Pipeline Timer
+Requires=blofin-stack-daily.service
+
+[Timer]
+# Run daily at 00:00 UTC
+OnCalendar=daily
+# Use UTC timezone
+OnCalendar=*-*-* 00:00:00
+Persistent=true
+# If system was off, run on next boot
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,30 @@
+# Data & databases
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.jsonl
+data/*.log
+data/logs/
+data/ai_reviews/
+data/models/
+data/reports/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Environment (no secrets, but keep example)
+.env
+
+# Backup/temp files
+*.backup
+*.bak
+*.log
+
+# IDE
+.idea/
+.vscode/
+*.swp

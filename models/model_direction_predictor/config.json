@@ -1,0 +1,20 @@
+{
+  "features": [
+    "close",
+    "returns",
+    "rsi_14",
+    "macd",
+    "macd_signal",
+    "macd_hist",
+    "volume_sma",
+    "volume_ratio"
+  ],
+  "hyperparams": {
+    "max_depth": 6,
+    "learning_rate": 0.1,
+    "n_estimators": 100,
+    "objective": "binary:logistic",
+    "eval_metric": "logloss"
+  },
+  "lookahead_candles": 5
+}

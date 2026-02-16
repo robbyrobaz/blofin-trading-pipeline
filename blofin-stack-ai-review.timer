@@ -1,0 +1,14 @@
+[Unit]
+Description=Blofin Stack AI Strategy Review Timer
+Requires=blofin-stack-ai-review.service
+
+[Timer]
+# Run twice daily at 8am and 8pm UTC
+OnCalendar=*-*-* 08,20:00:00
+# Also run 10 minutes after boot (for testing/missed runs)
+OnBootSec=10min
+# If the system was off during scheduled time, run on next boot
+Persistent=true
+
+[Install]
+WantedBy=timers.target

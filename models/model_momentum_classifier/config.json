@@ -1,0 +1,24 @@
+{
+  "features": [
+    "momentum_roc",
+    "momentum_rsi",
+    "momentum_stoch",
+    "trend_adx",
+    "trend_cci",
+    "volume_cmf",
+    "returns",
+    "acceleration"
+  ],
+  "hyperparams": {
+    "kernel": "rbf",
+    "C": 1.0,
+    "gamma": "scale",
+    "probability": true,
+    "random_state": 42
+  },
+  "classes": [
+    "decelerating",
+    "neutral",
+    "accelerating"
+  ]
+}

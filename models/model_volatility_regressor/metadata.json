@@ -1,0 +1,25 @@
+{
+  "created_at": null,
+  "trained_at": "2026-02-16T16:00:32.968302",
+  "performance": {
+    "train_accuracy": 0.9911015740860148,
+    "test_accuracy": 0.9316581807206138,
+    "train_r2": 0.9911015740860148,
+    "test_r2": 0.9316581807206138,
+    "test_mae": 0.053344244251335,
+    "test_rmse": 0.07085469320144411,
+    "test_mape": 9.613526845278674,
+    "n_samples": 1000
+  },
+  "feature_importance": {
+    "volatility_std": 0.9401918855737375,
+    "volatility_parkinson": 0.010748819396630483,
+    "atr_14": 0.009845186051508723,
+    "volume_std": 0.0060684476545848475,
+    "volume_ratio": 0.008653012409630937,
+    "returns_abs": 0.009486821764328296,
+    "high_low_range": 0.007035443659424867,
+    "close_variance": 0.00797038349015434
+  },
+  "saved_at": "2026-02-16T16:00:32.976196"
+}

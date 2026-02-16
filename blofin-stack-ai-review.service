@@ -1,0 +1,22 @@
+[Unit]
+Description=Blofin Stack AI Strategy Review
+After=network.target
+
+[Service]
+Type=oneshot
+User=rob
+WorkingDirectory=/home/rob/.openclaw/workspace/blofin-stack
+Environment="PATH=/home/rob/.openclaw/workspace/blofin-stack/.venv/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=/home/rob/.openclaw/workspace/blofin-stack/.venv/bin/python /home/rob/.openclaw/workspace/blofin-stack/ai_review.py
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=blofin-ai-review
+
+# Resource limits
+MemoryMax=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

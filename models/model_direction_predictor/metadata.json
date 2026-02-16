@@ -1,0 +1,23 @@
+{
+  "created_at": null,
+  "trained_at": "2026-02-16T16:00:32.874965",
+  "performance": {
+    "train_accuracy": 1.0,
+    "test_accuracy": 1.0,
+    "f1_score": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "n_samples": 1000
+  },
+  "feature_importance": {
+    "close": 0.0,
+    "returns": 1.0,
+    "rsi_14": 0.0,
+    "macd": 0.0,
+    "macd_signal": 0.0,
+    "macd_hist": 0.0,
+    "volume_sma": 0.0,
+    "volume_ratio": 0.0
+  },
+  "saved_at": "2026-02-16T16:00:32.879956"
+}

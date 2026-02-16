@@ -1,0 +1,17 @@
+#!/bin/bash
+# Wrapper script for blofin AI pipeline
+
+set -e
+
+WORKSPACE="/home/rob/.openclaw/workspace/blofin-stack"
+VENV="$WORKSPACE/.venv"
+PYTHON="$VENV/bin/python3"
+RUNNER="$WORKSPACE/orchestration/daily_runner.py"
+
+cd "$WORKSPACE"
+
+# Activate virtual environment
+source "$VENV/bin/activate"
+
+# Run the pipeline
+exec "$PYTHON" "$RUNNER"
