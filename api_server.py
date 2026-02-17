@@ -136,93 +136,54 @@ def fetch_summary_data():
             win_rate = 0
             avg_pnl = 0
         
-        # Strategy scores (by signal type from recent signals)
+        # Strategy scores (from backtested results in strategy_scores table)
         strategy_scores = []
-        strategy_data = {}
-        for sig in sigs:
-            strat = sig.get('strategy', 'unknown')
-            if strat not in strategy_data:
-                strategy_data[strat] = {'count': 0, 'by_signal': {'BUY': 0, 'SELL': 0}}
-            strategy_data[strat]['count'] += 1
-            signal_type = sig.get('signal', 'UNKNOWN')
-            if signal_type in strategy_data[strat]['by_signal']:
-                strategy_data[strat]['by_signal'][signal_type] += 1
+        strategy_rows = con.execute(
+            'SELECT DISTINCT strategy FROM strategy_scores ORDER BY strategy'
+        ).fetchall()
         
-        # Fetch per-strategy closed trades (single query, grouped in Python)
-        strategy_trades_map = {}
-        for row in con.execute('''
-            SELECT s.strategy, pt.pnl_pct
-            FROM paper_trades pt
-            JOIN confirmed_signals cs ON pt.confirmed_signal_id = cs.id
-            JOIN signals s ON cs.signal_id = s.id
-            WHERE pt.status = 'CLOSED'
-        '''):
-            row_dict = dict(row)
-            strat = row_dict.get('strategy', 'unknown')
-            if strat not in strategy_trades_map:
-                strategy_trades_map[strat] = []
-            strategy_trades_map[strat].append(row_dict)
-
-        # Calculate scores for each strategy
-        for strat_name, strat_info in sorted(strategy_data.items(), key=lambda x: x[1]['count'], reverse=True):
-            strat_trades = strategy_trades_map.get(strat_name, [])
-
-            if strat_trades:
-                wins = sum(1 for p in strat_trades if p['pnl_pct'] and p['pnl_pct'] > 0)
-                wr = (wins / len(strat_trades) * 100)
-                avg_pnl_val = sum(p['pnl_pct'] for p in strat_trades if p['pnl_pct']) / len(strat_trades)
-                total_pnl_val = sum(p['pnl_pct'] for p in strat_trades if p['pnl_pct'])
-
-                stats = calculate_stats(strat_trades)
-
-                # Composite scoring
-                pnl_component = max(0.0, min(100.0, ((avg_pnl_val + 2.0) / 4.0) * 100.0))
-                pf_component = max(0.0, min(100.0, ((stats['profit_factor'] - 0.8) / 1.2) * 100.0))
-                sortino_component = max(0.0, min(100.0, ((stats['sortino'] + 1.0) / 3.0) * 100.0))
-                dd_component = max(0.0, min(100.0, 100.0 - (stats['max_dd'] * 5.0)))
-                score = (
-                    (wr * 0.35) +
-                    (pnl_component * 0.25) +
-                    (pf_component * 0.20) +
-                    (sortino_component * 0.10) +
-                    (dd_component * 0.10)
-                )
-
+        for (strat_name,) in strategy_rows:
+            # Get latest scores for this strategy (aggregate across symbols and windows)
+            latest = con.execute(
+                '''SELECT 
+                    COUNT(*) as eval_count,
+                    AVG(win_rate) as avg_win_rate,
+                    AVG(avg_pnl_pct) as avg_pnl,
+                    AVG(sharpe_ratio) as avg_sharpe,
+                    AVG(max_drawdown_pct) as avg_max_dd,
+                    MAX(score) as max_score,
+                    AVG(score) as avg_score
+                FROM strategy_scores 
+                WHERE strategy = ?
+                ''',
+                (strat_name,)
+            ).fetchone()
+            
+            if latest:
+                eval_count, avg_wr, avg_pnl, avg_sharpe, avg_max_dd, max_score, avg_score = latest
+                win_pct = (avg_wr * 100) if avg_wr else 0
+                
+                # Score: blend of multiple metrics
+                final_score = max_score if max_score else 0
+                grade = _grade_score(final_score)
+                
                 strategy_scores.append({
                     'strategy': strat_name,
-                    'signals': strat_info['count'],
-                    'buy_count': strat_info['by_signal'].get('BUY', 0),
-                    'sell_count': strat_info['by_signal'].get('SELL', 0),
-                    'closed_count': len(strat_trades),
-                    'win_rate_pct': round(wr, 2),
-                    'avg_pnl_pct': round(avg_pnl_val, 4),
-                    'total_pnl_pct': round(total_pnl_val, 4),
-                    'profit_factor': stats['profit_factor'],
-                    'sortino': stats['sortino'],
-                    'max_dd': stats['max_dd'],
-                    'score': round(score, 2),
-                    'grade': _grade_score(score),
+                    'signals': int(sum(1 for s in sigs if s.get('strategy') == strat_name)),
+                    'buy_count': int(sum(1 for s in sigs if s.get('strategy') == strat_name and s.get('signal') == 'BUY')),
+                    'sell_count': int(sum(1 for s in sigs if s.get('strategy') == strat_name and s.get('signal') == 'SELL')),
+                    'closed_count': int(eval_count),
+                    'win_rate_pct': round(win_pct, 2),
+                    'avg_pnl_pct': round(avg_pnl, 4) if avg_pnl else 0,
+                    'profit_factor': 0,  # Not tracked separately in strategy_scores, use max_score instead
+                    'sortino': round(avg_sharpe, 2) if avg_sharpe else 0,
+                    'max_dd': round(avg_max_dd, 2) if avg_max_dd else 0,
+                    'score': round(final_score, 2),
+                    'grade': grade,
                 })
-            else:
-                # Strategy has signals but no closed trades
-                strategy_scores.append({
-                    'strategy': strat_name,
-                    'signals': strat_info['count'],
-                    'buy_count': strat_info['by_signal'].get('BUY', 0),
-                    'sell_count': strat_info['by_signal'].get('SELL', 0),
-                    'closed_count': 0,
-                    'win_rate_pct': 0.0,
-                    'avg_pnl_pct': 0.0,
-                    'total_pnl_pct': 0.0,
-                    'profit_factor': 0.0,
-                    'sortino': 0.0,
-                    'max_dd': 0.0,
-                    'score': 0.0,
-                    'grade': 'F',
-                })
-
-        # Rank by profit factor first, then score and closed count
-        strategy_scores.sort(key=lambda s: (s.get('profit_factor', 0), s.get('score', 0), s.get('closed_count', 0)), reverse=True)
+        
+        # Rank strategy scores by max_score descending
+        strategy_scores.sort(key=lambda s: s.get('score', 0), reverse=True)
 
         # Top 10 paper trades by PnL (SQL-side sort, no Python re-sort needed)
         top_trades = [dict(r) for r in con.execute(
