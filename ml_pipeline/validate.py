@@ -287,10 +287,11 @@ def main():
     # Initialize pipeline
     pipeline = ValidationPipeline(base_model_dir="models")
     
-    # Generate synthetic data for testing
+    # Load REAL data from database
     from ml_pipeline.train import TrainingPipeline
     train_pipeline = TrainingPipeline()
-    features_df = train_pipeline.generate_synthetic_data(n_samples=5000)
+    symbols = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT']
+    features_df = train_pipeline.load_real_data(symbols=symbols, lookback_bars=2000)
     
     # Validate all models
     results = pipeline.validate_all_models(features_df, days_back=7)

@@ -1,16 +1,16 @@
 {
   "created_at": null,
-  "trained_at": "2026-02-16T16:00:35.240048",
+  "trained_at": "2026-02-16T19:00:28.125781",
   "performance": {
-    "train_accuracy": -0.3334451430438561,
-    "test_accuracy": -0.49301506051329524,
-    "train_mae": 2909.110827402487,
-    "test_mae": 3073.678599951554,
-    "train_rmse": 3670.0925083100597,
-    "test_rmse": 3853.4803061892144,
-    "best_val_loss": 14849310.0,
+    "train_accuracy": -0.36153224362707914,
+    "test_accuracy": -0.6009967961060303,
+    "train_mae": 2946.7800521247914,
+    "test_mae": 3207.6240768347993,
+    "train_rmse": 3708.5436890167334,
+    "test_rmse": 3990.3986135081036,
+    "best_val_loss": 15923282.0,
     "n_samples": 1000
   },
   "feature_importance": {},
-  "saved_at": "2026-02-16T16:00:35.241976"
+  "saved_at": "2026-02-16T19:00:28.127892"
 }

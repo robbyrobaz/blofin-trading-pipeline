@@ -358,15 +358,22 @@ class DailyRunner:
                     raise ValueError(f"Insufficient training data: only {len(features_df)} samples after cleaning")
                 
             except Exception as e:
-                # Log error and fall back to synthetic data ONLY if real data fails
+                # FAIL LOUDLY - no synthetic fallback!
                 self.logger.error(
-                    f"Feature manager failed: {e}\n"
-                    f"Falling back to synthetic data (NOT RECOMMENDED for production)"
+                    f"FATAL: Feature manager failed to load real data: {e}\n"
+                    f"This is a critical error. Fix the database or feature pipeline.\n"
+                    f"We have 24.7M real ticks - there's no excuse for this to fail."
                 )
                 import traceback
                 traceback.print_exc()
                 
-                features_df = pipeline.generate_synthetic_data(n_samples=1000)
+                # Return error instead of falling back to synthetic garbage
+                return {
+                    'error': str(e),
+                    'models_trained': 0,
+                    'models_failed': 0,
+                    'message': 'Feature loading failed - aborting ML training'
+                }
             
             # Train all models in parallel
             self.logger.info(f"Training {len(pipeline.models)} ML models...")

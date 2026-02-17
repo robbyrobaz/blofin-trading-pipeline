@@ -334,10 +334,11 @@ def main():
         drift_threshold=0.10
     )
     
-    # Generate synthetic data
+    # Load REAL data from database
     from ml_pipeline.train import TrainingPipeline
     train_pipeline = TrainingPipeline()
-    features_df = train_pipeline.generate_synthetic_data(n_samples=5000)
+    symbols = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT']
+    features_df = train_pipeline.load_real_data(symbols=symbols, lookback_bars=2000)
     
     # Run auto-tuning
     results = pipeline.auto_tune(features_df, days_back=7, auto_retrain=True)

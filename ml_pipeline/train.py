@@ -231,95 +231,88 @@ class TrainingPipeline:
         
         return self.training_results
     
-    def generate_synthetic_data(self, n_samples: int = 1000) -> pd.DataFrame:
+    def load_real_data(self, symbols: list = None, lookback_bars: int = 2000) -> pd.DataFrame:
         """
-        Generate synthetic training data for testing.
+        Load REAL training data from database using FeatureManager.
         
         Args:
-            n_samples: Number of samples to generate
+            symbols: List of symbols to load (default: BTC, ETH, SOL)
+            lookback_bars: Number of candles to load per symbol
             
         Returns:
-            DataFrame with synthetic features and targets
+            DataFrame with real features and generated targets
         """
-        print(f"Generating {n_samples} synthetic training samples...")
+        from features.feature_manager import FeatureManager
         
-        np.random.seed(42)
+        if symbols is None:
+            symbols = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT']
         
-        # Generate base features
-        data = {
-            # Price features
-            "close": np.random.uniform(40000, 50000, n_samples),
-            "high": np.random.uniform(40000, 50000, n_samples),
-            "low": np.random.uniform(40000, 50000, n_samples),
-            "volume": np.random.uniform(1e6, 1e9, n_samples),
+        print(f"Loading REAL data for {len(symbols)} symbols ({lookback_bars} bars each)...")
+        
+        fm = FeatureManager()
+        all_features = []
+        
+        for symbol in symbols:
+            print(f"  Loading {symbol}...")
             
-            # Momentum features
-            "momentum_roc": np.random.uniform(-5, 5, n_samples),
-            "momentum_rsi": np.random.uniform(20, 80, n_samples),
-            "momentum_stoch": np.random.uniform(20, 80, n_samples),
-            
-            # Trend features
-            "trend_ema_diff": np.random.uniform(-1000, 1000, n_samples),
-            "trend_macd": np.random.uniform(-500, 500, n_samples),
-            "trend_adx": np.random.uniform(10, 50, n_samples),
-            "trend_cci": np.random.uniform(-200, 200, n_samples),
-            
-            # Volatility features
-            "volatility_std": np.random.uniform(100, 1000, n_samples),
-            "volatility_parkinson": np.random.uniform(0.01, 0.05, n_samples),
-            "atr_14": np.random.uniform(200, 800, n_samples),
-            
-            # Volume features
-            "volume_sma": np.random.uniform(1e6, 1e9, n_samples),
-            "volume_ratio": np.random.uniform(0.5, 2.0, n_samples),
-            "volume_std": np.random.uniform(1e5, 1e8, n_samples),
-            "volume_obv": np.random.uniform(-1e9, 1e9, n_samples),
-            "volume_mfi": np.random.uniform(20, 80, n_samples),
-            "volume_cmf": np.random.uniform(-0.5, 0.5, n_samples),
-            "volume_volatility": np.random.uniform(0.1, 2.0, n_samples),
-            
-            # Additional features
-            "returns": np.random.uniform(-0.05, 0.05, n_samples),
-            "returns_abs": np.random.uniform(0, 0.05, n_samples),
-            "acceleration": np.random.uniform(-0.01, 0.01, n_samples),
-            "rsi_14": np.random.uniform(20, 80, n_samples),
-            "macd": np.random.uniform(-500, 500, n_samples),
-            "macd_signal": np.random.uniform(-500, 500, n_samples),
-            "macd_hist": np.random.uniform(-200, 200, n_samples),
-            "max_drawdown": np.random.uniform(0, 0.2, n_samples),
-            "drawdown_duration": np.random.randint(0, 100, n_samples),
-            "sharpe_ratio": np.random.uniform(-1, 3, n_samples),
-            "high_low_range": np.random.uniform(100, 1000, n_samples),
-            "close_variance": np.random.uniform(1e5, 1e7, n_samples),
-            "price_range": np.random.uniform(500, 2000, n_samples),
-        }
+            try:
+                # Load features from real tick data
+                features = fm.get_features(
+                    symbol=symbol,
+                    timeframe='1m',
+                    lookback_bars=lookback_bars,
+                    fill_nan=True
+                )
+                
+                # Add symbol column for tracking
+                features['symbol'] = symbol
+                
+                all_features.append(features)
+                print(f"    ✓ {len(features)} samples loaded")
+                
+            except Exception as e:
+                print(f"    ✗ Failed to load {symbol}: {e}")
+                continue
         
-        df = pd.DataFrame(data)
+        if not all_features:
+            raise ValueError("Failed to load any real data. Check database and symbols.")
         
-        # Generate targets
-        # Direction: binary classification (0=DOWN, 1=UP)
-        df["target_direction"] = (df["returns"] > 0).astype(int)
+        # Combine all symbols
+        df = pd.concat(all_features, ignore_index=True)
         
-        # Risk: 0-100 score based on volatility
-        df["target_risk"] = np.clip(
-            (df["volatility_std"] / 10) + np.random.uniform(-10, 10, n_samples),
-            0, 100
-        )
+        print(f"\n✓ Loaded {len(df)} total samples from {len(all_features)} symbols")
         
-        # Price: future price (current + some change)
-        df["target_price"] = df["close"] * (1 + np.random.uniform(-0.05, 0.05, n_samples))
+        # Generate targets from real price data
+        print("  Generating targets from real price movement...")
         
-        # Momentum: 3-class classification (0=decel, 1=neutral, 2=accel)
-        df["target_momentum"] = pd.cut(
-            df["momentum_roc"],
-            bins=[-np.inf, -1, 1, np.inf],
+        # Direction: will price go up in next 5 candles?
+        df['target_direction'] = (df['close'].shift(-5) > df['close']).astype(int)
+        
+        # Risk: volatility over next 20 candles
+        df['target_risk'] = df['close'].rolling(20).std().fillna(0) * 100
+        
+        # Price: actual price 5 candles ahead
+        df['target_price'] = df['close'].shift(-5)
+        
+        # Momentum: categorize price change rate
+        price_change = df['close'].pct_change().fillna(0)
+        df['target_momentum'] = pd.cut(
+            price_change,
+            bins=[-np.inf, -0.01, 0.01, np.inf],
             labels=[0, 1, 2]
         ).astype(int)
         
-        # Volatility: future volatility
-        df["target_volatility"] = df["volatility_std"] * np.random.uniform(0.8, 1.2, n_samples) / 1000
+        # Volatility: standard deviation over next 10 candles
+        df['target_volatility'] = df['close'].rolling(10).std().fillna(0) / 1000
         
-        print(f"✓ Generated synthetic data with shape {df.shape}")
+        # Drop rows with NaN targets (from forward shifts)
+        initial_count = len(df)
+        df = df.dropna()
+        dropped = initial_count - len(df)
+        
+        print(f"  ✓ Targets generated ({dropped} rows dropped for forward-looking targets)")
+        print(f"\n✓ Final dataset: {len(df)} clean samples ready for training")
+        
         return df
 
 
@@ -331,8 +324,9 @@ def main():
     # Initialize pipeline
     pipeline = TrainingPipeline(base_model_dir="models")
     
-    # Generate synthetic data for testing
-    features_df = pipeline.generate_synthetic_data(n_samples=5000)
+    # Load REAL data from database (24.7M ticks!)
+    symbols = ['BTC-USDT', 'ETH-USDT', 'SOL-USDT', 'AVAX-USDT', 'LINK-USDT']
+    features_df = pipeline.load_real_data(symbols=symbols, lookback_bars=2000)
     
     # Train all models
     results = pipeline.train_all_models(features_df, max_workers=5)
