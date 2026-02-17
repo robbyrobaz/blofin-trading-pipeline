@@ -1,67 +1,77 @@
 #!/usr/bin/env python3
 """
 Verify that the LLM integration is properly configured for strategy generation.
-This script tests the Anthropic API connection and validates model access.
+This script tests the OpenClaw gateway connection and validates model access.
 """
 
 import sys
 from pathlib import Path
 
-def check_api_key():
-    """Check if API key is configured."""
-    print("1. Checking API key configuration...")
-    from orchestration.llm_client import _get_api_key
-    
-    key = _get_api_key()
-    if not key:
-        print("   ✗ No API key found!")
-        print("   → Add ANTHROPIC_API_KEY to .env file")
-        print("   → Get key from: https://console.anthropic.com/settings/keys")
-        return False
-    
-    if not key.startswith('sk-ant-api'):
-        print(f"   ⚠ API key has unusual format: {key[:15]}...")
-        print("   → Expected format: sk-ant-api...")
-        print("   → OAuth tokens (sk-ant-oat...) won't work")
-        return False
-    
-    print(f"   ✓ API key found: {key[:20]}...")
-    return True
-
-def test_haiku():
-    """Test Haiku (cheapest model for validation)."""
-    print("\n2. Testing Haiku API access...")
+def check_openclaw_available():
+    """Check if openclaw CLI is available."""
+    print("1. Checking OpenClaw CLI availability...")
+    import subprocess
     try:
-        from orchestration.llm_client import call_llm
-        response = call_llm("Respond with: 'Haiku OK'", model='haiku', max_tokens=20)
-        print(f"   ✓ Haiku works: {response.strip()}")
-        return True
-    except Exception as e:
-        print(f"   ✗ Haiku failed: {e}")
+        result = subprocess.run(
+            ['openclaw', '--version'],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode == 0:
+            version = result.stdout.strip().split()[1] if len(result.stdout.split()) > 1 else 'unknown'
+            print(f"   ✓ OpenClaw CLI found: {version}")
+            return True
+        else:
+            print("   ✗ OpenClaw CLI not responding properly")
+            return False
+    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+        print(f"   ✗ OpenClaw CLI not found: {e}")
         return False
 
-def test_sonnet():
-    """Test Sonnet (strategy tuner model)."""
-    print("\n3. Testing Sonnet API access...")
+def check_gateway():
+    """Check if OpenClaw gateway is running."""
+    print("\n2. Checking OpenClaw gateway status...")
+    import subprocess
     try:
-        from orchestration.llm_client import call_llm
-        response = call_llm("Respond with: 'Sonnet OK'", model='sonnet', max_tokens=20)
-        print(f"   ✓ Sonnet works: {response.strip()}")
-        return True
+        result = subprocess.run(
+            ['openclaw', 'health'],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode == 0:
+            print("   ✓ Gateway is running and healthy")
+            return True
+        else:
+            print("   ✗ Gateway health check failed")
+            print(f"   → Run: openclaw gateway start")
+            return False
     except Exception as e:
-        print(f"   ✗ Sonnet failed: {e}")
+        print(f"   ✗ Gateway not accessible: {e}")
+        print("   → Run: openclaw gateway start")
         return False
 
-def test_opus():
-    """Test Opus (strategy designer model)."""
-    print("\n4. Testing Opus API access...")
+def test_llm_call(model: str, test_prompt: str = None) -> bool:
+    """Test a specific model via llm_client."""
+    if test_prompt is None:
+        test_prompt = f"Respond with exactly: '{model.upper()} OK'"
+    
+    print(f"\n3.{ord(model[0])-ord('a')+1}. Testing {model} model...")
     try:
         from orchestration.llm_client import call_llm
-        response = call_llm("Respond with: 'Opus OK'", model='opus', max_tokens=20)
-        print(f"   ✓ Opus works: {response.strip()}")
+        response = call_llm(test_prompt, model=model, max_tokens=50)
+        
+        # Check if response is reasonable
+        if not response or len(response.strip()) == 0:
+            print(f"   ✗ {model} returned empty response")
+            return False
+        
+        print(f"   ✓ {model} works")
+        print(f"   Response: {response[:100]}...")
         return True
     except Exception as e:
-        print(f"   ✗ Opus failed: {e}")
+        print(f"   ✗ {model} failed: {e}")
         return False
 
 def main():
@@ -70,35 +80,51 @@ def main():
     print("=" * 60)
     
     # Check prerequisites
-    api_key_ok = check_api_key()
-    if not api_key_ok:
+    cli_ok = check_openclaw_available()
+    if not cli_ok:
         print("\n" + "=" * 60)
         print("SETUP REQUIRED:")
-        print("  1. Get API key from https://console.anthropic.com/")
-        print("  2. Add to .env file: ANTHROPIC_API_KEY=sk-ant-api-...")
-        print("  3. Run this script again")
+        print("  OpenClaw CLI not found or not working")
+        print("  → Install: npm install -g @openclaw/cli")
+        print("  → Or check PATH")
         print("=" * 60)
         sys.exit(1)
     
-    # Test models
-    haiku_ok = test_haiku()
-    sonnet_ok = test_sonnet()
-    opus_ok = test_opus()
+    gateway_ok = check_gateway()
+    if not gateway_ok:
+        print("\n" + "=" * 60)
+        print("GATEWAY NOT RUNNING:")
+        print("  → Start gateway: openclaw gateway start")
+        print("  → Check status: openclaw health")
+        print("=" * 60)
+        sys.exit(1)
+    
+    # Test models (note: actual model used depends on OpenClaw routing config)
+    print("\n" + "=" * 60)
+    print("Testing Models (via OpenClaw Gateway)")
+    print("=" * 60)
+    
+    haiku_ok = test_llm_call('haiku')
+    sonnet_ok = test_llm_call('sonnet')
+    opus_ok = test_llm_call('opus')
     
     print("\n" + "=" * 60)
     if haiku_ok and sonnet_ok and opus_ok:
         print("✓✓✓ ALL TESTS PASSED")
         print("\nStrategy generation is ready:")
-        print("  • strategy_designer.py can generate new strategies (Opus)")
-        print("  • strategy_tuner.py can optimize strategies (Sonnet)")
+        print("  • strategy_designer.py can generate new strategies")
+        print("  • strategy_tuner.py can optimize strategies")
+        print("\nNote: Actual model selection is controlled by OpenClaw's")
+        print("      routing configuration (see: openclaw models status)")
         print("=" * 60)
         sys.exit(0)
     else:
-        print("✗✗✗ SOME TESTS FAILED")
-        print("\nCheck:")
-        print("  • API key is valid and active")
-        print("  • Account has access to Claude 3/4 models")
-        print("  • Network connectivity to Anthropic API")
+        print("⚠ PARTIAL SUCCESS")
+        print("\nSome models failed, but basic connectivity works.")
+        print("Check:")
+        print("  • Model auth: openclaw models status")
+        print("  • Model config: openclaw models list")
+        print("  • Gateway logs: openclaw logs")
         print("=" * 60)
         sys.exit(1)
 
