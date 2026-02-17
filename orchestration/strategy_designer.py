@@ -207,36 +207,14 @@ Provide ONLY the Python code, no explanation, no markdown, just the code.
     
     def _call_opus(self, prompt: str) -> str:
         """Call Claude Opus via OpenClaw CLI with file-based prompt."""
-        import tempfile
-        import os
         try:
-            # Write prompt to temp file to avoid CLI length limits
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                f.write(prompt)
-                prompt_file = f.name
+            from orchestration.llm_client import call_llm
+            output = call_llm(prompt, model='opus', max_tokens=4096)
             
-            result = subprocess.run(
-                ['openclaw', 'chat', '--model', 'opus', '--file', prompt_file],
-                capture_output=True,
-                text=True,
-                timeout=300,  # 5 min timeout
-                env={**os.environ, 'NO_COLOR': '1'}  # Disable ANSI colors
-            )
+            if not output.strip():
+                raise Exception("Empty Opus output")
             
-            os.unlink(prompt_file)
-            
-            # Validate output
-            if not result.stdout.strip():
-                error_msg = f"Empty Opus output. stderr: {result.stderr}"
-                print(f"ERROR: {error_msg}")
-                raise Exception(error_msg)
-            
-            if result.returncode != 0:
-                error_msg = f"Opus call failed with code {result.returncode}. stderr: {result.stderr}"
-                print(f"ERROR: {error_msg}")
-                raise Exception(error_msg)
-            
-            return result.stdout.strip()
+            return output.strip()
         except Exception as e:
             raise Exception(f"Failed to call Opus: {e}")
     

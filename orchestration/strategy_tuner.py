@@ -177,35 +177,15 @@ CRITICAL: Return ONLY valid JSON. No markdown, no code fences, no explanation te
     def _call_sonnet(self, prompt: str) -> str:
         """Call Claude Sonnet via OpenClaw CLI with file-based prompt."""
         import tempfile
-        import os
         try:
-            # Write prompt to temp file to avoid CLI length limits
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                f.write(prompt)
-                prompt_file = f.name
+            from orchestration.llm_client import call_llm
+            output = call_llm(prompt, model='sonnet', max_tokens=4096)
             
-            result = subprocess.run(
-                ['openclaw', 'chat', '--model', 'sonnet', '--file', prompt_file],
-                capture_output=True,
-                text=True,
-                timeout=120,  # 2 min timeout
-                env={**os.environ, 'NO_COLOR': '1'}  # Disable ANSI colors
-            )
-            
-            os.unlink(prompt_file)
-            
-            # Validate output
-            if not result.stdout.strip():
-                error_msg = f"Empty Sonnet output. stderr: {result.stderr}"
-                print(f"WARNING: {error_msg}")
-                return ""  # Return empty to trigger fallback
-            
-            if result.returncode != 0:
-                error_msg = f"Sonnet call failed with code {result.returncode}. stderr: {result.stderr}"
-                print(f"WARNING: {error_msg}")
+            if not output.strip():
+                print("WARNING: Empty Sonnet output")
                 return ""
             
-            return result.stdout.strip()
+            return output.strip()
         except Exception as e:
             print(f"ERROR: Failed to call Sonnet: {e}")
             return ""
