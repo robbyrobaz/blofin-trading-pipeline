@@ -254,6 +254,9 @@ class H(BaseHTTPRequestHandler):
         self.send_header('Content-Type', ctype)
         self.send_header('Content-Length', str(len(b)))
         self.send_header('Cache-Control', 'no-cache')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
         self.wfile.write(b)
 
@@ -394,8 +397,11 @@ function renderStrategies(){
 }
 async function render(){
   try{
+    document.getElementById('loading').textContent='Fetching data...';
     const r=await fetch('/api/summary');
+    if(!r.ok){document.getElementById('loading').innerHTML='API error: '+r.status+' '+r.statusText; return;}
     const d=await r.json();
+    if(!d || !d.strategy_scores){document.getElementById('loading').innerHTML='No data returned'; return;}
     if(d.error){document.getElementById('loading').textContent=d.error; return;}
     document.getElementById('loading').style.display='none';
     document.getElementById('content').style.display='block';
