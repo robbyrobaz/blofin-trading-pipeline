@@ -178,8 +178,9 @@ class FeatureManager:
             self._cache_timestamps[cache_key] = time.time()
     
     def get_features(self, symbol: str, timeframe: str = '1m', 
-                    feature_list: List[str] = None, lookback_bars: int = 500,
-                    params: Dict[str, Any] = None, limit_rows: int = None) -> pd.DataFrame:
+                    feature_list: List[str] = None, lookback_bars: int = 1000,
+                    params: Dict[str, Any] = None, limit_rows: int = None, 
+                    fill_nan: bool = True) -> pd.DataFrame:
         """
         Compute features for a symbol.
         
@@ -250,6 +251,9 @@ class FeatureManager:
             cols_to_keep = base_cols + [f for f in feature_list if f in result.columns]
             result = result[cols_to_keep]
         
+        # Validate and handle NaN values
+        result = self._validate_and_fill_features(result, fill_nan=fill_nan)
+        
         # Update cache
         self._update_cache(cache_key, result)
         
@@ -307,6 +311,104 @@ class FeatureManager:
             group_name: module.get_available_features()
             for group_name, module in self._feature_groups.items()
         }
+    
+    def _validate_and_fill_features(self, df: pd.DataFrame, fill_nan: bool = True) -> pd.DataFrame:
+        """
+        Validate feature data and optionally fill NaN values.
+        
+        Args:
+            df: DataFrame with features
+            fill_nan: Whether to fill NaN values
+            
+        Returns:
+            Validated and optionally filled DataFrame
+        """
+        # Check for NaN values
+        nan_counts = df.isna().sum()
+        total_rows = len(df)
+        
+        # Log warnings for features with high NaN percentage
+        for col in nan_counts.index:
+            if col in ['timestamp']:  # Skip timestamp column
+                continue
+                
+            nan_pct = (nan_counts[col] / total_rows) * 100
+            
+            # Warn if >50% NaN (likely insufficient data for indicator period)
+            if nan_pct > 50:
+                import warnings
+                warnings.warn(
+                    f"Feature '{col}' has {nan_pct:.1f}% NaN values ({nan_counts[col]}/{total_rows} rows). "
+                    f"Consider increasing lookback_bars or using shorter-period indicators.",
+                    UserWarning
+                )
+        
+        if not fill_nan:
+            return df
+        
+        # Fill NaN values with intelligent strategies
+        result = df.copy()
+        
+        # Strategy 1: Forward fill for price-based features (preserves trends)
+        price_features = ['open', 'high', 'low', 'close', 'hl2', 'hlc3', 'ohlc4']
+        for col in price_features:
+            if col in result.columns:
+                result[col] = result[col].ffill()
+        
+        # Strategy 2: Fill volume with 0 (no volume = 0 is reasonable)
+        volume_features = [c for c in result.columns if 'volume' in c.lower() or c == 'obv']
+        for col in volume_features:
+            if col in result.columns:
+                result[col] = result[col].fillna(0)
+        
+        # Strategy 3: Forward fill for technical indicators (preserves state)
+        indicator_features = [c for c in result.columns if any(
+            ind in c.lower() for ind in ['rsi', 'macd', 'ema', 'sma', 'stoch', 'cci', 
+                                          'williams', 'adx', 'atr', 'bbands', 'keltner']
+        )]
+        for col in indicator_features:
+            if col in result.columns:
+                result[col] = result[col].ffill()
+        
+        # Strategy 4: Fill returns/momentum with 0 (no change = 0)
+        momentum_features = [c for c in result.columns if any(
+            m in c.lower() for m in ['returns', 'momentum', 'roc', 'gap']
+        )]
+        for col in momentum_features:
+            if col in result.columns:
+                result[col] = result[col].fillna(0)
+        
+        # Strategy 5: Fill regime features with defaults
+        if 'regime_type' in result.columns:
+            result['regime_type'] = result['regime_type'].fillna('unknown')
+        
+        boolean_regime_cols = ['is_trending_up', 'is_trending_down', 'is_ranging', 'is_volatile']
+        for col in boolean_regime_cols:
+            if col in result.columns:
+                result[col] = result[col].fillna(False)
+        
+        # Strategy 6: Backward fill any remaining NaN (last resort)
+        result = result.bfill()
+        
+        # Strategy 7: Forward fill any remaining NaN after backfill
+        result = result.ffill()
+        
+        # Strategy 8: Fill any still-remaining NaN with 0 (edge cases)
+        result = result.fillna(0)
+        
+        # Replace any inf values with NaN, then fill with column median
+        numeric_cols = result.select_dtypes(include=[np.number]).columns
+        for col in numeric_cols:
+            # Replace inf with NaN
+            result[col] = result[col].replace([np.inf, -np.inf], np.nan)
+            # Fill with median (more robust than mean for outliers)
+            if result[col].notna().any():
+                median_val = result[col].median()
+                result[col] = result[col].fillna(median_val)
+            else:
+                result[col] = result[col].fillna(0)
+        
+        return result
     
     def clear_cache(self) -> None:
         """Clear all cached features."""

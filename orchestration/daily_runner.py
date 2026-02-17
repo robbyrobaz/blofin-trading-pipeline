@@ -303,35 +303,69 @@ class DailyRunner:
             # Get training data
             self.logger.info("Fetching feature data for ML training...")
             try:
-                # Try to get real feature data from database
+                # Get real feature data from database with proper lookback for all indicators
                 features_df = feature_manager.get_features(
                     symbol='BTC-USDT',
                     timeframe='1m',
-                    lookback_bars=1000  # Use smaller dataset for speed
+                    lookback_bars=2000,  # Increased to ensure sufficient data for all indicators
+                    fill_nan=True  # Enable intelligent NaN filling
                 )
                 
-                # Generate targets (simplified for initial testing)
+                # Generate targets
                 import pandas as pd
                 import numpy as np
                 
+                # Direction: will price go up in next 5 candles?
                 features_df['target_direction'] = (features_df['close'].shift(-5) > features_df['close']).astype(int)
+                
+                # Risk: volatility over next 20 candles
                 features_df['target_risk'] = features_df['close'].rolling(20).std().fillna(0) * 100
-                features_df['target_price'] = features_df['close'].shift(-5).fillna(features_df['close'])
+                
+                # Price: actual price 5 candles ahead
+                features_df['target_price'] = features_df['close'].shift(-5)
+                
+                # Momentum: categorize price change rate (fill NaN before categorical conversion)
+                price_change = features_df['close'].pct_change().fillna(0)
                 features_df['target_momentum'] = pd.cut(
-                    features_df['close'].pct_change(),
+                    price_change,
                     bins=[-np.inf, -0.01, 0.01, np.inf],
                     labels=[0, 1, 2]
                 ).astype(int)
+                
+                # Volatility: standard deviation over next 10 candles
                 features_df['target_volatility'] = features_df['close'].rolling(10).std().fillna(0) / 1000
                 
-                # Drop rows with NaN targets
+                # Drop rows with NaN targets (mostly at the end due to forward shifting)
+                initial_count = len(features_df)
                 features_df = features_df.dropna()
+                dropped_count = initial_count - len(features_df)
                 
-                self.logger.info(f"✓ Loaded {len(features_df)} samples from feature_manager")
+                self.logger.info(
+                    f"✓ Loaded {len(features_df)} samples from feature_manager "
+                    f"({dropped_count} rows dropped due to forward-looking targets)"
+                )
+                
+                # Verify we have clean data
+                nan_count = features_df.isna().sum().sum()
+                inf_count = np.isinf(features_df.select_dtypes(include=[np.number])).sum().sum()
+                
+                if nan_count > 0:
+                    self.logger.warning(f"Feature data still contains {nan_count} NaN values after filling")
+                if inf_count > 0:
+                    self.logger.warning(f"Feature data contains {inf_count} Inf values")
+                
+                if len(features_df) < 100:
+                    raise ValueError(f"Insufficient training data: only {len(features_df)} samples after cleaning")
                 
             except Exception as e:
-                # Fallback to synthetic data if feature_manager fails
-                self.logger.warning(f"Feature manager failed ({e}), using synthetic data")
+                # Log error and fall back to synthetic data ONLY if real data fails
+                self.logger.error(
+                    f"Feature manager failed: {e}\n"
+                    f"Falling back to synthetic data (NOT RECOMMENDED for production)"
+                )
+                import traceback
+                traceback.print_exc()
+                
                 features_df = pipeline.generate_synthetic_data(n_samples=1000)
             
             # Train all models in parallel
@@ -436,17 +470,13 @@ Provide analysis in JSON format:
 }}
 """
             
-            # Call Opus
-            result = subprocess.run(
-                ['openclaw', 'chat', '--model', 'opus', '--prompt', prompt],
-                capture_output=True,
-                text=True,
-                timeout=600
-            )
+            # Call Opus via Anthropic API
+            from orchestration.llm_client import call_llm
+            llm_output = call_llm(prompt, model='opus')
             
             # Parse review
             import re
-            json_match = re.search(r'\{.*\}', result.stdout, re.DOTALL)
+            json_match = re.search(r'\{.*\}', llm_output, re.DOTALL)
             if json_match:
                 ai_review = json.loads(json_match.group(0))
             else:

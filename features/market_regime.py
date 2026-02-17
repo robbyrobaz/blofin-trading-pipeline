@@ -18,17 +18,39 @@ def detect_trend(df: pd.DataFrame, lookback: int = 50) -> Tuple[bool, bool, floa
     
     # Use linear regression slope to detect trend
     recent = df['close'].tail(lookback)
-    x = np.arange(len(recent))
-    slope, intercept = np.polyfit(x, recent.values, 1)
     
-    # Normalize slope by price
-    normalized_slope = (slope / recent.mean()) * 100
+    # Check for NaN or insufficient data
+    if recent.isna().all() or len(recent.dropna()) < 2:
+        return False, False, 0.0
+    
+    x = np.arange(len(recent))
+    y = recent.values
+    
+    # Remove NaN values for regression
+    valid_mask = ~np.isnan(y)
+    if valid_mask.sum() < 2:
+        return False, False, 0.0
+    
+    x_valid = x[valid_mask]
+    y_valid = y[valid_mask]
+    
+    slope, intercept = np.polyfit(x_valid, y_valid, 1)
+    
+    # Normalize slope by price with protection
+    mean_price = recent.mean()
+    if mean_price == 0 or np.isnan(mean_price):
+        return False, False, 0.0
+    
+    normalized_slope = (slope / mean_price) * 100
     
     # Calculate R-squared to measure trend strength
-    y_pred = slope * x + intercept
-    ss_res = np.sum((recent.values - y_pred) ** 2)
-    ss_tot = np.sum((recent.values - recent.mean()) ** 2)
+    y_pred = slope * x_valid + intercept
+    ss_res = np.sum((y_valid - y_pred) ** 2)
+    ss_tot = np.sum((y_valid - y_valid.mean()) ** 2)
+    
+    # Protect against division by zero
     r_squared = 1 - (ss_res / ss_tot) if ss_tot != 0 else 0
+    r_squared = max(0.0, min(1.0, r_squared))  # Clamp to [0, 1]
     
     # Trend detected if slope is significant and R-squared is high
     is_trending_up = normalized_slope > 0.1 and r_squared > 0.5
@@ -49,8 +71,16 @@ def detect_ranging(df: pd.DataFrame, lookback: int = 50, threshold_pct: float = 
     
     recent = df['close'].tail(lookback)
     
-    # Calculate range as percentage of mean price
-    price_range = (recent.max() - recent.min()) / recent.mean() * 100
+    # Check for NaN or insufficient data
+    if recent.isna().all() or len(recent.dropna()) < 2:
+        return False
+    
+    # Calculate range as percentage of mean price with protection
+    mean_price = recent.mean()
+    if mean_price == 0 or np.isnan(mean_price):
+        return False
+    
+    price_range = (recent.max() - recent.min()) / mean_price * 100
     
     # Check if price is oscillating within a tight range
     is_ranging = price_range < threshold_pct
@@ -70,8 +100,18 @@ def detect_volatile(df: pd.DataFrame, lookback: int = 20, threshold_pct: float =
     
     recent = df['close'].tail(lookback)
     
-    # Calculate volatility as standard deviation percentage
-    volatility = (recent.std() / recent.mean()) * 100
+    # Check for NaN or insufficient data
+    if recent.isna().all() or len(recent.dropna()) < 2:
+        return False
+    
+    # Calculate volatility as standard deviation percentage with protection
+    mean_price = recent.mean()
+    std_price = recent.std()
+    
+    if mean_price == 0 or np.isnan(mean_price) or np.isnan(std_price):
+        return False
+    
+    volatility = (std_price / mean_price) * 100
     
     is_volatile = volatility > threshold_pct
     
@@ -136,8 +176,16 @@ def compute_regime_features(df: pd.DataFrame, params: Dict[str, Any] = None) -> 
             # Determine primary regime type (priority: volatile > trending > ranging)
             if volatile:
                 regime = 'volatile'
-                strength = min(1.0, (df_slice['close'].tail(volatile_lookback).std() / 
-                                    df_slice['close'].tail(volatile_lookback).mean()) / volatile_threshold)
+                # Strength calculation with protection
+                recent_slice = df_slice['close'].tail(volatile_lookback)
+                mean_price = recent_slice.mean()
+                std_price = recent_slice.std()
+                
+                if mean_price > 0 and not np.isnan(mean_price) and not np.isnan(std_price):
+                    strength = min(1.0, (std_price / mean_price) / volatile_threshold)
+                else:
+                    strength = 0.0
+                    
             elif trending_up:
                 regime = 'trending_up'
                 strength = trend_str
@@ -147,9 +195,14 @@ def compute_regime_features(df: pd.DataFrame, params: Dict[str, Any] = None) -> 
             elif ranging:
                 regime = 'ranging'
                 # Strength is inverse of range (tighter range = stronger ranging regime)
-                recent = df_slice['close'].tail(ranging_lookback)
-                price_range = (recent.max() - recent.min()) / recent.mean() * 100
-                strength = max(0.0, 1.0 - (price_range / ranging_threshold))
+                recent_slice = df_slice['close'].tail(ranging_lookback)
+                mean_price = recent_slice.mean()
+                
+                if mean_price > 0 and not np.isnan(mean_price):
+                    price_range = (recent_slice.max() - recent_slice.min()) / mean_price * 100
+                    strength = max(0.0, 1.0 - (price_range / ranging_threshold))
+                else:
+                    strength = 0.0
             else:
                 regime = 'neutral'
                 strength = 0.0
@@ -219,14 +272,27 @@ def get_regime_strength(df: pd.DataFrame, lookback: int = 50) -> float:
     
     if regime == "volatile":
         recent = df['close'].tail(lookback)
-        return min(1.0, (recent.std() / recent.mean()) / 0.025)
+        mean_price = recent.mean()
+        std_price = recent.std()
+        
+        if mean_price > 0 and not np.isnan(mean_price) and not np.isnan(std_price):
+            return min(1.0, (std_price / mean_price) / 0.025)
+        else:
+            return 0.0
+            
     elif regime in ["trending_up", "trending_down"]:
         _, _, strength = detect_trend(df, lookback)
         return strength
+        
     elif regime == "ranging":
         recent = df['close'].tail(lookback)
-        price_range = (recent.max() - recent.min()) / recent.mean() * 100
-        return max(0.0, 1.0 - (price_range / 2.0))
+        mean_price = recent.mean()
+        
+        if mean_price > 0 and not np.isnan(mean_price):
+            price_range = (recent.max() - recent.min()) / mean_price * 100
+            return max(0.0, 1.0 - (price_range / 2.0))
+        else:
+            return 0.0
     else:
         return 0.0
 

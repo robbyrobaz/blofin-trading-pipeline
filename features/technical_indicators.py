@@ -7,12 +7,18 @@ from typing import Dict, Any
 
 
 def compute_rsi(series: pd.Series, period: int = 14) -> pd.Series:
-    """Calculate RSI (Relative Strength Index)."""
+    """Calculate RSI (Relative Strength Index) with NaN protection."""
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
+    
+    # Protect against division by zero
+    rs = gain / loss.replace(0, np.nan)
     rsi = 100 - (100 / (1 + rs))
+    
+    # Replace inf/nan from division issues
+    rsi = rsi.replace([np.inf, -np.inf], np.nan)
+    
     return rsi
 
 
@@ -32,11 +38,15 @@ def compute_macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int 
 
 
 def compute_stochastic(df: pd.DataFrame, k_period: int = 14, d_period: int = 3) -> Dict[str, pd.Series]:
-    """Calculate Stochastic Oscillator."""
+    """Calculate Stochastic Oscillator with division-by-zero protection."""
     low_min = df['low'].rolling(window=k_period).min()
     high_max = df['high'].rolling(window=k_period).max()
     
-    stoch_k = 100 * ((df['close'] - low_min) / (high_max - low_min))
+    # Protect against division by zero when high_max == low_min
+    denominator = (high_max - low_min).replace(0, np.nan)
+    stoch_k = 100 * ((df['close'] - low_min) / denominator)
+    stoch_k = stoch_k.replace([np.inf, -np.inf], np.nan)
+    
     stoch_d = stoch_k.rolling(window=d_period).mean()
     
     return {
@@ -46,26 +56,36 @@ def compute_stochastic(df: pd.DataFrame, k_period: int = 14, d_period: int = 3) 
 
 
 def compute_cci(df: pd.DataFrame, period: int = 20) -> pd.Series:
-    """Calculate CCI (Commodity Channel Index)."""
+    """Calculate CCI (Commodity Channel Index) with NaN protection."""
     typical_price = (df['high'] + df['low'] + df['close']) / 3
     sma_tp = typical_price.rolling(window=period).mean()
     mean_deviation = typical_price.rolling(window=period).apply(
-        lambda x: np.abs(x - x.mean()).mean()
+        lambda x: np.abs(x - x.mean()).mean() if len(x) > 0 else np.nan
     )
-    cci = (typical_price - sma_tp) / (0.015 * mean_deviation)
+    
+    # Protect against division by zero
+    denominator = (0.015 * mean_deviation).replace(0, np.nan)
+    cci = (typical_price - sma_tp) / denominator
+    cci = cci.replace([np.inf, -np.inf], np.nan)
+    
     return cci
 
 
 def compute_williams_r(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    """Calculate Williams %R."""
+    """Calculate Williams %R with division-by-zero protection."""
     high_max = df['high'].rolling(window=period).max()
     low_min = df['low'].rolling(window=period).min()
-    williams_r = -100 * ((high_max - df['close']) / (high_max - low_min))
+    
+    # Protect against division by zero
+    denominator = (high_max - low_min).replace(0, np.nan)
+    williams_r = -100 * ((high_max - df['close']) / denominator)
+    williams_r = williams_r.replace([np.inf, -np.inf], np.nan)
+    
     return williams_r
 
 
 def compute_adx(df: pd.DataFrame, period: int = 14) -> Dict[str, pd.Series]:
-    """Calculate ADX (Average Directional Index)."""
+    """Calculate ADX (Average Directional Index) with NaN protection."""
     # Calculate +DM and -DM
     high_diff = df['high'].diff()
     low_diff = -df['low'].diff()
@@ -81,24 +101,33 @@ def compute_adx(df: pd.DataFrame, period: int = 14) -> Dict[str, pd.Series]:
     
     # Smooth the values
     atr = tr.rolling(window=period).mean()
-    plus_di = 100 * (plus_dm.rolling(window=period).mean() / atr)
-    minus_di = 100 * (minus_dm.rolling(window=period).mean() / atr)
     
-    # Calculate DX and ADX
-    dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di))
+    # Protect against division by zero in ATR
+    atr_safe = atr.replace(0, np.nan)
+    plus_di = 100 * (plus_dm.rolling(window=period).mean() / atr_safe)
+    minus_di = 100 * (minus_dm.rolling(window=period).mean() / atr_safe)
+    
+    # Calculate DX and ADX - protect against division by zero
+    di_sum = (plus_di + minus_di).replace(0, np.nan)
+    dx = 100 * ((plus_di - minus_di).abs() / di_sum)
+    dx = dx.replace([np.inf, -np.inf], np.nan)
     adx = dx.rolling(window=period).mean()
     
     return {
         'adx': adx,
-        'plus_di': plus_di,
-        'minus_di': minus_di
+        'plus_di': plus_di.replace([np.inf, -np.inf], np.nan),
+        'minus_di': minus_di.replace([np.inf, -np.inf], np.nan)
     }
 
 
 def compute_adl(df: pd.DataFrame) -> pd.Series:
-    """Calculate ADL (Accumulation/Distribution Line)."""
-    clv = ((df['close'] - df['low']) - (df['high'] - df['close'])) / (df['high'] - df['low'])
-    clv = clv.fillna(0)  # Handle division by zero when high == low
+    """Calculate ADL (Accumulation/Distribution Line) with division-by-zero protection."""
+    # Protect against division by zero when high == low
+    denominator = (df['high'] - df['low']).replace(0, np.nan)
+    clv = ((df['close'] - df['low']) - (df['high'] - df['close'])) / denominator
+    clv = clv.fillna(0)  # When high == low, set CLV to 0
+    clv = clv.replace([np.inf, -np.inf], 0)
+    
     adl = (clv * df['volume']).cumsum()
     return adl
 
