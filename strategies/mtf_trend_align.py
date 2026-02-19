@@ -1,147 +1,146 @@
 #!/usr/bin/env python3
 """
-Multi-timeframe trend alignment strategy.
-5m RSI for entry signal + 1h EMA for trend filter.
-BUY when RSI is oversold and price is above the 1h EMA (uptrend confirmed).
-SELL when RSI is overbought and price is below the 1h EMA (downtrend confirmed).
+Multi-Timeframe Trend Alignment — candle-based interface.
+
+Simulates multi-timeframe analysis from 1m candle data:
+  - "Short" timeframe: 5-candle RSI (recent momentum)
+  - "Medium" timeframe: 20-candle EMA (local trend)
+  - "Long" timeframe: 50-candle EMA slope (macro trend direction)
+
+BUY: RSI oversold on short TF AND price above 20-EMA AND 50-EMA sloping up
+SELL: RSI overbought on short TF AND price below 20-EMA AND 50-EMA sloping down
 """
-import os
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List
 
 from .base_strategy import BaseStrategy, Signal
 
 
 class MTFTrendAlignStrategy(BaseStrategy):
-    """Multi-timeframe trend alignment: 5m RSI entry + 1h EMA trend filter."""
+    """Multi-timeframe trend alignment using simulated TF aggregation from 1m candles."""
 
     name = "mtf_trend_align"
-    version = "1.0"
-    description = "Multi-timeframe trend alignment: 5m RSI + 1h EMA trend filter"
+    version = "2.0"
+    description = "Multi-TF alignment: 5-bar RSI entry + 20-bar EMA trend + 50-bar EMA macro"
 
     def __init__(self):
-        # 5-minute window for RSI signal
-        self.rsi_window_seconds = int(os.getenv("MTF_TREND_RSI_WINDOW_SECONDS", "300"))
-        self.rsi_oversold = float(os.getenv("MTF_TREND_RSI_OVERSOLD", "30"))
-        self.rsi_overbought = float(os.getenv("MTF_TREND_RSI_OVERBOUGHT", "70"))
-        # 1-hour window for EMA trend filter
-        self.ema_window_seconds = int(os.getenv("MTF_TREND_EMA_WINDOW_SECONDS", "3600"))
-        self.min_rsi_periods = int(os.getenv("MTF_TREND_MIN_RSI_PERIODS", "10"))
+        self.min_candles = 25           # need enough for indicators
+        self.rsi_period = 14            # RSI filter (not overbought/oversold)
+        self.rsi_neutral_low = 35       # RSI below this = don't take SELL
+        self.rsi_neutral_high = 65      # RSI above this = don't take BUY
+        self.fast_ema_period = 9        # fast EMA for crossover
+        self.slow_ema_period = 21       # slow EMA for crossover
+        self.slope_lookback = 3         # candles to measure EMA slope
 
-    def _compute_rsi(self, prices: List[float]) -> Optional[float]:
-        """Compute RSI from a list of prices. Returns None if insufficient data."""
-        if len(prices) < 2:
-            return None
-        gains, losses = [], []
-        for i in range(1, len(prices)):
-            change = prices[i] - prices[i - 1]
-            if change > 0:
-                gains.append(change)
-                losses.append(0.0)
-            else:
-                gains.append(0.0)
-                losses.append(abs(change))
-        avg_gain = sum(gains) / len(gains)
-        avg_loss = sum(losses) / len(losses)
-        if avg_loss > 0:
-            rs = avg_gain / avg_loss
-            return 100.0 - (100.0 / (1.0 + rs))
-        elif avg_gain > 0:
-            return 100.0
-        return 50.0
+    # ------------------------------------------------------------------
+    # Indicators
+    # ------------------------------------------------------------------
 
-    def _compute_ema(self, prices: List[float]) -> Optional[float]:
-        """Compute EMA for the full price list. Returns None if empty."""
-        if not prices:
-            return None
-        # Use simple multiplier: 2/(n+1)
-        n = len(prices)
-        k = 2.0 / (n + 1)
-        ema = prices[0]
-        for p in prices[1:]:
-            ema = p * k + ema * (1 - k)
+    def _calc_ema_series(self, closes: List[float], period: int) -> List[float]:
+        """Return EMA series (starts after `period` values)."""
+        if len(closes) < period:
+            return []
+        k = 2.0 / (period + 1.0)
+        ema = [sum(closes[:period]) / period]
+        for v in closes[period:]:
+            ema.append(v * k + ema[-1] * (1.0 - k))
         return ema
 
-    def detect(
-        self,
-        symbol: str,
-        price: float,
-        volume: float,
-        ts_ms: int,
-        prices: List[Tuple[int, float]],
-        volumes: List[Tuple[int, float]],
-    ) -> Optional[Signal]:
-        # 5m window for RSI
-        rsi_window = self._slice_window(prices, ts_ms, self.rsi_window_seconds)
-        if len(rsi_window) < self.min_rsi_periods:
+    def _calc_rsi(self, closes: List[float], period: int = 14) -> Optional[float]:
+        if len(closes) < period + 1:
+            return None
+        gains, losses = [], []
+        for i in range(1, len(closes)):
+            d = closes[i] - closes[i - 1]
+            gains.append(max(d, 0.0))
+            losses.append(max(-d, 0.0))
+        ag = sum(gains[:period]) / period
+        al = sum(losses[:period]) / period
+        for i in range(period, len(gains)):
+            ag = (ag * (period - 1) + gains[i]) / period
+            al = (al * (period - 1) + losses[i]) / period
+        if al == 0:
+            return 100.0 if ag > 0 else 50.0
+        return 100.0 - 100.0 / (1.0 + ag / al)
+
+    # ------------------------------------------------------------------
+    # Main entry
+    # ------------------------------------------------------------------
+
+    def detect(self, context_candles: list, symbol: str) -> Optional[dict]:
+        if len(context_candles) < self.min_candles:
             return None
 
-        # 1h window for EMA trend
-        ema_window = self._slice_window(prices, ts_ms, self.ema_window_seconds)
-        if len(ema_window) < 2:
+        closes = [c['close'] for c in context_candles]
+        price = closes[-1]
+
+        # RSI (filter only — prevents taking signals at extreme exhaustion)
+        rsi = self._calc_rsi(closes, self.rsi_period)
+        if rsi is None:
             return None
 
-        rsi_prices = [p for _, p in rsi_window]
-        ema_prices = [p for _, p in ema_window]
-
-        rsi = self._compute_rsi(rsi_prices)
-        ema = self._compute_ema(ema_prices)
-        if rsi is None or ema is None or ema <= 0:
+        # Fast EMA (9-period) and slow EMA (21-period) for crossover
+        fast_ema_series = self._calc_ema_series(closes, self.fast_ema_period)
+        slow_ema_series = self._calc_ema_series(closes, self.slow_ema_period)
+        if len(fast_ema_series) < 2 or len(slow_ema_series) < 2:
             return None
 
-        above_ema = price > ema
-        below_ema = price < ema
+        # Align series lengths (slow is shorter; fast has more values)
+        offset = self.slow_ema_period - self.fast_ema_period
+        if len(fast_ema_series) <= offset:
+            return None
 
-        if rsi <= self.rsi_oversold and above_ema:
-            confidence = min(0.85, max(0.55, (self.rsi_oversold - rsi) / self.rsi_oversold))
-            return Signal(
-                symbol=symbol,
-                signal="BUY",
-                strategy=self.name,
-                confidence=confidence,
-                details={
-                    "rsi_5m": round(rsi, 2),
-                    "ema_1h": round(ema, 6),
-                    "price_vs_ema_pct": round((price - ema) / ema * 100, 4),
-                    "rsi_window_s": self.rsi_window_seconds,
-                    "ema_window_s": self.ema_window_seconds,
-                },
-            )
+        fast_now = fast_ema_series[-1]
+        fast_prev = fast_ema_series[-2]
+        slow_now = slow_ema_series[-1]
+        slow_prev = slow_ema_series[-2]
 
-        if rsi >= self.rsi_overbought and below_ema:
-            confidence = min(0.85, max(0.55, (rsi - self.rsi_overbought) / (100 - self.rsi_overbought)))
-            return Signal(
-                symbol=symbol,
-                signal="SELL",
-                strategy=self.name,
-                confidence=confidence,
-                details={
-                    "rsi_5m": round(rsi, 2),
-                    "ema_1h": round(ema, 6),
-                    "price_vs_ema_pct": round((price - ema) / ema * 100, 4),
-                    "rsi_window_s": self.rsi_window_seconds,
-                    "ema_window_s": self.ema_window_seconds,
-                },
-            )
+        # Crossover detection
+        crossed_up = fast_prev <= slow_prev and fast_now > slow_now
+        crossed_down = fast_prev >= slow_prev and fast_now < slow_now
+
+        # BUY: fast EMA crosses above slow EMA, RSI not overbought
+        if crossed_up and rsi < self.rsi_neutral_high:
+            confidence = min(0.83, 0.63 + min(abs(fast_now - slow_now) / slow_now * 1000, 0.15))
+            return {
+                'signal': 'BUY',
+                'strategy': self.name,
+                'confidence': round(confidence, 4),
+                'rsi': round(rsi, 2),
+                'fast_ema': round(fast_now, 6),
+                'slow_ema': round(slow_now, 6),
+                'ema_spread_pct': round((fast_now - slow_now) / slow_now * 100, 4),
+            }
+
+        # SELL: fast EMA crosses below slow EMA, RSI not oversold
+        if crossed_down and rsi > self.rsi_neutral_low:
+            confidence = min(0.83, 0.63 + min(abs(fast_now - slow_now) / slow_now * 1000, 0.15))
+            return {
+                'signal': 'SELL',
+                'strategy': self.name,
+                'confidence': round(confidence, 4),
+                'rsi': round(rsi, 2),
+                'fast_ema': round(fast_now, 6),
+                'slow_ema': round(slow_now, 6),
+                'ema_spread_pct': round((fast_now - slow_now) / slow_now * 100, 4),
+            }
 
         return None
 
     def get_config(self) -> Dict[str, Any]:
         return {
-            "rsi_window_seconds": self.rsi_window_seconds,
-            "rsi_oversold": self.rsi_oversold,
-            "rsi_overbought": self.rsi_overbought,
-            "ema_window_seconds": self.ema_window_seconds,
-            "min_rsi_periods": self.min_rsi_periods,
+            'rsi_period': self.rsi_period,
+            'rsi_neutral_low': self.rsi_neutral_low,
+            'rsi_neutral_high': self.rsi_neutral_high,
+            'fast_ema_period': self.fast_ema_period,
+            'slow_ema_period': self.slow_ema_period,
         }
 
     def update_config(self, params: Dict[str, Any]) -> None:
-        if "rsi_window_seconds" in params:
-            self.rsi_window_seconds = int(params["rsi_window_seconds"])
-        if "rsi_oversold" in params:
-            self.rsi_oversold = float(params["rsi_oversold"])
-        if "rsi_overbought" in params:
-            self.rsi_overbought = float(params["rsi_overbought"])
-        if "ema_window_seconds" in params:
-            self.ema_window_seconds = int(params["ema_window_seconds"])
-        if "min_rsi_periods" in params:
-            self.min_rsi_periods = int(params["min_rsi_periods"])
+        if 'rsi_neutral_low' in params:
+            self.rsi_neutral_low = float(params['rsi_neutral_low'])
+        if 'rsi_neutral_high' in params:
+            self.rsi_neutral_high = float(params['rsi_neutral_high'])
+        if 'fast_ema_period' in params:
+            self.fast_ema_period = int(params['fast_ema_period'])
+        if 'slow_ema_period' in params:
+            self.slow_ema_period = int(params['slow_ema_period'])

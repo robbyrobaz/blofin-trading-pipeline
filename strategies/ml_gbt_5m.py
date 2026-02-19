@@ -1,171 +1,195 @@
 #!/usr/bin/env python3
 """
-ML Gradient Boosted Tree strategy on 5m features.
-Loads a trained GBT model if available; falls back to a multi-factor heuristic
-that approximates what a GBT learns from these features.
+ML Gradient Boosted Tree Strategy — candle-based interface.
 
-Features used:
-  - 5m return (momentum)
-  - RSI(14) on 5m prices
-  - Bollinger Band position (z-score)
-  - Volume ratio (current vs. 5m mean)
+Loads a trained sklearn GBT model if available; otherwise uses a
+multi-factor heuristic that approximates what a well-trained GBT learns.
+
+Features computed from candle data:
+  - 5-bar return (short momentum)
+  - RSI(14) on close
+  - Bollinger Band z-score (close vs 20-SMA, normalized by std)
+  - Volume ratio (current vs 20-bar average)
+  - ATR ratio (current true range vs 14-period ATR)
 """
-import os
 import pickle
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
+import math
 
 from .base_strategy import BaseStrategy, Signal
 
 
 class MLGbt5mStrategy(BaseStrategy):
-    """Gradient boosted tree entry signals on 5m features."""
+    """GBT on 5-bar candle features (returns, RSI, BB z-score, vol ratio, ATR)."""
 
     name = "ml_gbt_5m"
-    version = "1.0"
-    description = "Gradient boosted tree on 5m features (returns, RSI, BB position, volume ratio)"
+    version = "2.0"
+    description = "GBT/heuristic on candle features: return, RSI, BB z-score, vol ratio, ATR"
 
     def __init__(self):
-        self.window_seconds = int(os.getenv("ML_GBT_WINDOW_SECONDS", "300"))
-        self.buy_threshold = float(os.getenv("ML_GBT_BUY_THRESHOLD", "0.60"))
-        self.sell_threshold = float(os.getenv("ML_GBT_SELL_THRESHOLD", "0.60"))
-        self.model_path = os.getenv(
-            "ML_GBT_MODEL_PATH",
-            "/home/rob/.openclaw/workspace/blofin-stack/ml_pipeline/models/gbt_5m.pkl",
+        self.min_candles = 30
+        self.momentum_bars = 5          # short-term return lookback
+        self.rsi_period = 14
+        self.bb_period = 20
+        self.vol_sma_period = 20
+        self.atr_period = 14
+        self.buy_threshold = 0.38       # tuned for 1m candle heuristic scoring
+        self.sell_threshold = 0.38
+        self.model_path = (
+            "/home/rob/.openclaw/workspace/blofin-stack/ml_pipeline/models/gbt_5m.pkl"
         )
         self._model = self._load_model()
 
     def _load_model(self):
-        """Attempt to load a pickled sklearn model. Returns None if not found."""
-        path = Path(self.model_path)
-        if path.exists():
-            try:
-                with open(path, "rb") as f:
+        try:
+            p = Path(self.model_path)
+            if p.exists():
+                with open(p, 'rb') as f:
                     return pickle.load(f)
-            except Exception:
-                pass
+        except Exception:
+            pass
         return None
 
-    def _compute_features(
-        self,
-        price: float,
-        prices: List[Tuple[int, float]],
-        volumes: List[Tuple[int, float]],
-        ts_ms: int,
-    ) -> Optional[Dict[str, float]]:
-        """Extract 5m features. Returns None if insufficient data."""
-        window_p = self._slice_window(prices, ts_ms, self.window_seconds)
-        window_v = self._slice_window(volumes, ts_ms, self.window_seconds)
+    # ------------------------------------------------------------------
+    # Feature extraction
+    # ------------------------------------------------------------------
 
-        if len(window_p) < 10:
-            return None
-
-        price_vals = [p for _, p in window_p]
-        vol_vals = [v for _, v in window_v] if window_v else []
-
-        # 5m return
-        first = window_p[0][1]
-        ret_5m = (price - first) / first if first > 0 else 0.0
-
-        # RSI(14) on 5m prices
-        rsi = self._compute_rsi(price_vals)
-
-        # Bollinger Band z-score
-        mean = sum(price_vals) / len(price_vals)
-        variance = sum((p - mean) ** 2 for p in price_vals) / len(price_vals)
-        std = variance ** 0.5
-        bb_z = (price - mean) / std if std > 0 else 0.0
-
-        # Volume ratio: current vs. 5m mean
-        if vol_vals:
-            mean_vol = sum(vol_vals) / len(vol_vals)
-            vol_ratio = vol_vals[-1] / mean_vol if mean_vol > 0 else 1.0
-        else:
-            vol_ratio = 1.0
-
-        return {
-            "ret_5m": ret_5m,
-            "rsi": rsi,
-            "bb_z": bb_z,
-            "vol_ratio": vol_ratio,
-        }
-
-    def _compute_rsi(self, prices: List[float]) -> float:
-        if len(prices) < 2:
+    def _calc_rsi(self, closes: List[float], period: int = 14) -> float:
+        if len(closes) < period + 1:
             return 50.0
         gains, losses = [], []
-        for i in range(1, len(prices)):
-            change = prices[i] - prices[i - 1]
-            if change > 0:
-                gains.append(change)
-                losses.append(0.0)
-            else:
-                gains.append(0.0)
-                losses.append(abs(change))
-        avg_gain = sum(gains) / len(gains) if gains else 0.0
-        avg_loss = sum(losses) / len(losses) if losses else 0.0
-        if avg_loss > 0:
-            return 100.0 - (100.0 / (1.0 + avg_gain / avg_loss))
-        return 100.0 if avg_gain > 0 else 50.0
+        for i in range(1, len(closes)):
+            d = closes[i] - closes[i - 1]
+            gains.append(max(d, 0.0))
+            losses.append(max(-d, 0.0))
+        ag = sum(gains[:period]) / period
+        al = sum(losses[:period]) / period
+        for i in range(period, len(gains)):
+            ag = (ag * (period - 1) + gains[i]) / period
+            al = (al * (period - 1) + losses[i]) / period
+        if al == 0:
+            return 100.0 if ag > 0 else 50.0
+        return 100.0 - 100.0 / (1.0 + ag / al)
 
-    def _heuristic_score(self, features: Dict[str, float]) -> Tuple[float, float]:
-        """
-        Multi-factor heuristic approximating GBT learned weights.
-        Returns (buy_score, sell_score) each in [0, 1].
-        """
-        ret = features["ret_5m"]
-        rsi = features["rsi"]
-        bb_z = features["bb_z"]
-        vol_ratio = features["vol_ratio"]
+    def _calc_atr(self, candles: List[dict], period: int = 14) -> float:
+        trs = []
+        for i in range(1, len(candles)):
+            c = candles[i]
+            pc = candles[i - 1]['close']
+            tr = max(c['high'] - c['low'], abs(c['high'] - pc), abs(c['low'] - pc))
+            trs.append(tr)
+        if not trs:
+            return 0.0
+        return sum(trs[-period:]) / min(len(trs), period)
 
-        # Normalize inputs
-        # Return: positive = bullish, negative = bearish
-        ret_score = min(1.0, max(-1.0, ret / 0.02))  # scale: ±2% = ±1
+    def _extract_features(self, candles: List[dict]) -> Optional[Dict[str, float]]:
+        closes = [c['close'] for c in candles]
+        volumes = [c['volume'] for c in candles]
+        price = closes[-1]
 
-        # RSI: <30 oversold (bullish), >70 overbought (bearish)
-        rsi_buy_score = max(0.0, (30.0 - rsi) / 30.0)
-        rsi_sell_score = max(0.0, (rsi - 70.0) / 30.0)
+        # 5-bar return
+        if len(closes) < self.momentum_bars + 1:
+            return None
+        ret = (closes[-1] - closes[-self.momentum_bars - 1]) / closes[-self.momentum_bars - 1]
 
-        # BB z-score: negative = below mean (potential buy), positive = above (potential sell)
-        bb_buy_score = max(0.0, min(1.0, (-bb_z) / 2.0))
-        bb_sell_score = max(0.0, min(1.0, bb_z / 2.0))
+        # RSI
+        rsi = self._calc_rsi(closes, self.rsi_period)
 
-        # Volume: high volume confirms signal
-        vol_conf = min(1.5, vol_ratio) / 1.5
+        # BB z-score
+        bb_window = closes[-self.bb_period:]
+        bb_mean = sum(bb_window) / len(bb_window)
+        bb_var = sum((p - bb_mean) ** 2 for p in bb_window) / len(bb_window)
+        bb_std = math.sqrt(bb_var) if bb_var > 0 else 0.0
+        bb_z = (price - bb_mean) / bb_std if bb_std > 0 else 0.0
 
-        # Weights (approximating typical GBT feature importance for price prediction)
-        # ret: 35%, RSI: 30%, BB: 25%, vol: 10%
-        buy_raw = 0.35 * max(0.0, ret_score) + 0.30 * rsi_buy_score + 0.25 * bb_buy_score + 0.10 * vol_conf
-        sell_raw = 0.35 * max(0.0, -ret_score) + 0.30 * rsi_sell_score + 0.25 * bb_sell_score + 0.10 * vol_conf
+        # Volume ratio
+        vol_avg = sum(volumes[-self.vol_sma_period:]) / min(len(volumes), self.vol_sma_period)
+        vol_ratio = volumes[-1] / vol_avg if vol_avg > 0 else 1.0
 
-        # Normalize to [0, 1] — max raw is ~1.0 with all factors aligned
-        buy_score = min(1.0, buy_raw)
-        sell_score = min(1.0, sell_raw)
+        # ATR ratio: current TR vs average ATR
+        atr = self._calc_atr(candles, self.atr_period)
+        cur_tr = max(
+            candles[-1]['high'] - candles[-1]['low'],
+            abs(candles[-1]['high'] - candles[-2]['close']),
+            abs(candles[-1]['low'] - candles[-2]['close']),
+        ) if len(candles) >= 2 else 0.0
+        atr_ratio = cur_tr / atr if atr > 0 else 1.0
 
-        return buy_score, sell_score
+        return {
+            'ret': ret,
+            'rsi': rsi,
+            'bb_z': bb_z,
+            'vol_ratio': vol_ratio,
+            'atr_ratio': atr_ratio,
+        }
 
-    def detect(
-        self,
-        symbol: str,
-        price: float,
-        volume: float,
-        ts_ms: int,
-        prices: List[Tuple[int, float]],
-        volumes: List[Tuple[int, float]],
-    ) -> Optional[Signal]:
-        features = self._compute_features(price, prices, volumes, ts_ms)
+    # ------------------------------------------------------------------
+    # Heuristic scoring (approximates GBT)
+    # ------------------------------------------------------------------
+
+    def _heuristic_score(self, f: Dict[str, float]) -> Tuple[float, float]:
+        """Returns (buy_score, sell_score) each in [0, 1]."""
+        ret = f['ret']
+        rsi = f['rsi']
+        bb_z = f['bb_z']
+        vol_ratio = f['vol_ratio']
+        atr_ratio = f['atr_ratio']
+
+        # Momentum (positive → bullish)
+        ret_bull = max(0.0, min(1.0, ret / 0.005))    # +0.5% return = full score
+        ret_bear = max(0.0, min(1.0, -ret / 0.005))
+
+        # RSI
+        rsi_bull = max(0.0, (35.0 - rsi) / 35.0)      # RSI < 35 → bullish
+        rsi_bear = max(0.0, (rsi - 65.0) / 35.0)      # RSI > 65 → bearish
+
+        # BB z-score
+        bb_bull = max(0.0, min(1.0, -bb_z / 1.5))     # below mean → bullish
+        bb_bear = max(0.0, min(1.0, bb_z / 1.5))      # above mean → bearish
+
+        # Volume (confirms both directions)
+        vol_conf = min(1.0, vol_ratio / 2.0)
+
+        # ATR (high ATR = breakout, confirms momentum)
+        atr_conf = min(1.0, atr_ratio / 2.0)
+
+        # Weighted combination (GBT-like importance)
+        buy_score = (
+            0.30 * ret_bull +
+            0.25 * rsi_bull +
+            0.25 * bb_bull +
+            0.10 * vol_conf +
+            0.10 * atr_conf
+        )
+        sell_score = (
+            0.30 * ret_bear +
+            0.25 * rsi_bear +
+            0.25 * bb_bear +
+            0.10 * vol_conf +
+            0.10 * atr_conf
+        )
+
+        return min(1.0, buy_score), min(1.0, sell_score)
+
+    # ------------------------------------------------------------------
+    # Main entry
+    # ------------------------------------------------------------------
+
+    def detect(self, context_candles: list, symbol: str) -> Optional[dict]:
+        if len(context_candles) < self.min_candles:
+            return None
+
+        features = self._extract_features(context_candles)
         if features is None:
             return None
 
         if self._model is not None:
-            # Use trained model: expects [[ret_5m, rsi, bb_z, vol_ratio]]
             try:
-                X = [[features["ret_5m"], features["rsi"], features["bb_z"], features["vol_ratio"]]]
+                X = [[features['ret'], features['rsi'], features['bb_z'], features['vol_ratio']]]
                 proba = self._model.predict_proba(X)[0]
-                # Assume classes: 0=SELL, 1=HOLD, 2=BUY or binary 0=no, 1=BUY
                 if len(proba) == 2:
-                    buy_score = proba[1]
-                    sell_score = 1.0 - proba[1]
+                    buy_score, sell_score = proba[1], 1.0 - proba[1]
                 elif len(proba) == 3:
                     sell_score, _, buy_score = proba
                 else:
@@ -176,55 +200,46 @@ class MLGbt5mStrategy(BaseStrategy):
             buy_score, sell_score = self._heuristic_score(features)
 
         if buy_score >= self.buy_threshold and buy_score > sell_score:
-            return Signal(
-                symbol=symbol,
-                signal="BUY",
-                strategy=self.name,
-                confidence=round(buy_score, 4),
-                details={
-                    "model": "gbt" if self._model else "heuristic",
-                    "ret_5m": round(features["ret_5m"] * 100, 4),
-                    "rsi": round(features["rsi"], 2),
-                    "bb_z": round(features["bb_z"], 4),
-                    "vol_ratio": round(features["vol_ratio"], 4),
-                    "buy_score": round(buy_score, 4),
-                },
-            )
+            return {
+                'signal': 'BUY',
+                'strategy': self.name,
+                'confidence': round(buy_score, 4),
+                'model': 'gbt' if self._model else 'heuristic',
+                'ret_pct': round(features['ret'] * 100, 4),
+                'rsi': round(features['rsi'], 2),
+                'bb_z': round(features['bb_z'], 4),
+                'vol_ratio': round(features['vol_ratio'], 4),
+                'buy_score': round(buy_score, 4),
+            }
 
         if sell_score >= self.sell_threshold and sell_score > buy_score:
-            return Signal(
-                symbol=symbol,
-                signal="SELL",
-                strategy=self.name,
-                confidence=round(sell_score, 4),
-                details={
-                    "model": "gbt" if self._model else "heuristic",
-                    "ret_5m": round(features["ret_5m"] * 100, 4),
-                    "rsi": round(features["rsi"], 2),
-                    "bb_z": round(features["bb_z"], 4),
-                    "vol_ratio": round(features["vol_ratio"], 4),
-                    "sell_score": round(sell_score, 4),
-                },
-            )
+            return {
+                'signal': 'SELL',
+                'strategy': self.name,
+                'confidence': round(sell_score, 4),
+                'model': 'gbt' if self._model else 'heuristic',
+                'ret_pct': round(features['ret'] * 100, 4),
+                'rsi': round(features['rsi'], 2),
+                'bb_z': round(features['bb_z'], 4),
+                'vol_ratio': round(features['vol_ratio'], 4),
+                'sell_score': round(sell_score, 4),
+            }
 
         return None
 
     def get_config(self) -> Dict[str, Any]:
         return {
-            "window_seconds": self.window_seconds,
-            "buy_threshold": self.buy_threshold,
-            "sell_threshold": self.sell_threshold,
-            "model_path": self.model_path,
-            "model_loaded": self._model is not None,
+            'buy_threshold': self.buy_threshold,
+            'sell_threshold': self.sell_threshold,
+            'momentum_bars': self.momentum_bars,
+            'model_loaded': self._model is not None,
         }
 
     def update_config(self, params: Dict[str, Any]) -> None:
-        if "window_seconds" in params:
-            self.window_seconds = int(params["window_seconds"])
-        if "buy_threshold" in params:
-            self.buy_threshold = float(params["buy_threshold"])
-        if "sell_threshold" in params:
-            self.sell_threshold = float(params["sell_threshold"])
-        if "model_path" in params:
-            self.model_path = str(params["model_path"])
+        if 'buy_threshold' in params:
+            self.buy_threshold = float(params['buy_threshold'])
+        if 'sell_threshold' in params:
+            self.sell_threshold = float(params['sell_threshold'])
+        if 'model_path' in params:
+            self.model_path = str(params['model_path'])
             self._model = self._load_model()

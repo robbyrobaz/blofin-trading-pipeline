@@ -1,142 +1,135 @@
 #!/usr/bin/env python3
-import os
-from typing import Optional, Dict, Any, List, Tuple
-from collections import defaultdict
+"""
+Pivot-Point Support/Resistance Strategy — candle-based interface.
+
+Uses standard pivot points calculated from previous candle's H/L/C:
+  Pivot = (H + L + C) / 3
+  R1 = 2 * Pivot - L
+  S1 = 2 * Pivot - H
+  R2 = Pivot + (H - L)
+  S2 = Pivot - (H - L)
+
+Also detects price approaching and bouncing from these levels.
+BUY when price touches/penetrates S1/S2 then closes back above.
+SELL when price touches/penetrates R1/R2 then closes back below.
+"""
+from typing import Optional, Dict, Any, List
 
 from .base_strategy import BaseStrategy, Signal
 
 
 class SupportResistanceStrategy(BaseStrategy):
-    """Detects support/resistance levels via price clustering and rejection."""
-    
+    """Pivot point support/resistance bounce detection."""
+
     name = "support_resistance"
-    version = "1.0"
-    description = "Detects support/resistance levels via price clustering and rejection"
-    
+    version = "2.0"
+    description = "Pivot-point S/R levels from prior candles with bounce detection"
+
     def __init__(self):
-        self.lookback_seconds = int(os.getenv("SR_LOOKBACK_SECONDS", "1800"))
-        self.cluster_tolerance_pct = float(os.getenv("SR_CLUSTER_TOLERANCE_PCT", "0.5"))
-        self.min_touches = int(os.getenv("SR_MIN_TOUCHES", "3"))
-        self.rejection_pct = float(os.getenv("SR_REJECTION_PCT", "0.25"))
-    
-    def _find_levels(self, prices: List[float]) -> List[float]:
-        """Find clustered price levels."""
-        if not prices:
-            return []
-        
-        # Group prices into clusters
-        clusters = defaultdict(list)
-        for p in prices:
-            # Find if price belongs to existing cluster
-            found_cluster = False
-            for level in list(clusters.keys()):
-                tolerance = level * (self.cluster_tolerance_pct / 100.0)
-                if abs(p - level) <= tolerance:
-                    clusters[level].append(p)
-                    found_cluster = True
-                    break
-            
-            if not found_cluster:
-                clusters[p].append(p)
-        
-        # Filter clusters with minimum touches
-        levels = []
-        for level, touches in clusters.items():
-            if len(touches) >= self.min_touches:
-                # Use average of cluster as the level
-                avg_level = sum(touches) / len(touches)
-                levels.append(avg_level)
-        
-        return sorted(levels)
-    
-    def detect(
-        self,
-        symbol: str,
-        price: float,
-        volume: float,
-        ts_ms: int,
-        prices: List[Tuple[int, float]],
-        volumes: List[Tuple[int, float]]
-    ) -> Optional[Signal]:
-        window = self._slice_window(prices, ts_ms, self.lookback_seconds)
-        
-        if len(window) < self.min_touches * 2:
+        self.min_candles = 20
+        self.pivot_lookback = 5         # candles to average for pivot calculation
+        self.touch_pct = 0.15          # price within 0.15% of level = "touching"
+        self.vol_sma_period = 20
+        self.vol_confirm_ratio = 1.1    # slight volume increase confirms bounce
+
+    # ------------------------------------------------------------------
+    # Pivot calculation
+    # ------------------------------------------------------------------
+
+    def _calc_pivots(self, candles: List[dict]) -> dict:
+        """Standard pivot points from the lookback window."""
+        h = max(c['high'] for c in candles)
+        l = min(c['low'] for c in candles)
+        c_avg = sum(c['close'] for c in candles) / len(candles)
+
+        pivot = (h + l + c_avg) / 3.0
+        r1 = 2 * pivot - l
+        s1 = 2 * pivot - h
+        r2 = pivot + (h - l)
+        s2 = pivot - (h - l)
+
+        return {'pivot': pivot, 'r1': r1, 'r2': r2, 's1': s1, 's2': s2}
+
+    # ------------------------------------------------------------------
+    # Main entry
+    # ------------------------------------------------------------------
+
+    def detect(self, context_candles: list, symbol: str) -> Optional[dict]:
+        if len(context_candles) < self.min_candles:
             return None
-        
-        price_values = [p for _, p in window[:-1]]  # Exclude current price
-        levels = self._find_levels(price_values)
-        
-        if not levels:
+
+        # Pivot from previous candles (not current)
+        pivot_candles = context_candles[-self.pivot_lookback - 1:-1]
+        if not pivot_candles:
             return None
-        
-        # Check for support bounce (price near support, moving up)
-        for level in levels:
-            if price < level:
+
+        pivots = self._calc_pivots(pivot_candles)
+        current = context_candles[-1]
+        prev = context_candles[-2]
+        close = current['close']
+        prev_close = prev['close']
+
+        # Volume filter
+        volumes = [c['volume'] for c in context_candles]
+        vol_sma = sum(volumes[-self.vol_sma_period - 1:-1]) / self.vol_sma_period
+        vol_ratio = current['volume'] / vol_sma if vol_sma > 0 else 1.0
+
+        touch_pct = self.touch_pct / 100.0
+
+        # Check for support bounce (S1, S2)
+        for level_name, level in [('s1', pivots['s1']), ('s2', pivots['s2'])]:
+            if level <= 0:
                 continue
-            
-            distance_pct = ((price - level) / level) * 100.0
-            
-            # Price recently bounced from support
-            if 0 < distance_pct <= self.rejection_pct:
-                # Check if price was below level recently
-                recent_prices = [p for _, p in window[-5:]]
-                if any(p <= level for p in recent_prices):
-                    confidence = min(0.80, 0.60 + (len([p for p in price_values if abs(p - level) / level * 100 <= self.cluster_tolerance_pct]) * 0.05))
-                    return Signal(
-                        symbol=symbol,
-                        signal="BUY",
-                        strategy=self.name,
-                        confidence=confidence,
-                        details={
-                            "level": round(level, 6),
-                            "touches": len([p for p in price_values if abs(p - level) / level * 100 <= self.cluster_tolerance_pct]),
-                            "distance_pct": round(distance_pct, 4),
-                            "type": "support_bounce",
-                        }
-                    )
-        
-        # Check for resistance rejection (price near resistance, moving down)
-        for level in levels:
-            if price > level:
+            # Previous candle touched/penetrated support
+            prev_touched = prev_close <= level * (1 + touch_pct)
+            # Current candle closed above support
+            bounced = close > level and prev_close <= level * (1 + touch_pct)
+            if prev_touched and close > level:
+                if vol_ratio >= self.vol_confirm_ratio:
+                    confidence = 0.72 if level_name == 's1' else 0.78
+                    return {
+                        'signal': 'BUY',
+                        'strategy': self.name,
+                        'confidence': confidence,
+                        'level': round(level, 6),
+                        'level_name': level_name,
+                        'pivot': round(pivots['pivot'], 6),
+                        'vol_ratio': round(vol_ratio, 4),
+                    }
+
+        # Check for resistance rejection (R1, R2)
+        for level_name, level in [('r1', pivots['r1']), ('r2', pivots['r2'])]:
+            if level <= 0:
                 continue
-            
-            distance_pct = ((level - price) / level) * 100.0
-            
-            # Price recently rejected at resistance
-            if 0 < distance_pct <= self.rejection_pct:
-                # Check if price was above level recently
-                recent_prices = [p for _, p in window[-5:]]
-                if any(p >= level for p in recent_prices):
-                    confidence = min(0.80, 0.60 + (len([p for p in price_values if abs(p - level) / level * 100 <= self.cluster_tolerance_pct]) * 0.05))
-                    return Signal(
-                        symbol=symbol,
-                        signal="SELL",
-                        strategy=self.name,
-                        confidence=confidence,
-                        details={
-                            "level": round(level, 6),
-                            "touches": len([p for p in price_values if abs(p - level) / level * 100 <= self.cluster_tolerance_pct]),
-                            "distance_pct": round(distance_pct, 4),
-                            "type": "resistance_rejection",
-                        }
-                    )
-        
+            # Previous candle touched/penetrated resistance
+            prev_touched = prev_close >= level * (1 - touch_pct)
+            # Current candle closed below resistance
+            if prev_touched and close < level:
+                if vol_ratio >= self.vol_confirm_ratio:
+                    confidence = 0.72 if level_name == 'r1' else 0.78
+                    return {
+                        'signal': 'SELL',
+                        'strategy': self.name,
+                        'confidence': confidence,
+                        'level': round(level, 6),
+                        'level_name': level_name,
+                        'pivot': round(pivots['pivot'], 6),
+                        'vol_ratio': round(vol_ratio, 4),
+                    }
+
         return None
-    
+
     def get_config(self) -> Dict[str, Any]:
         return {
-            "lookback_seconds": self.lookback_seconds,
-            "cluster_tolerance_pct": self.cluster_tolerance_pct,
-            "min_touches": self.min_touches,
-            "rejection_pct": self.rejection_pct,
+            'pivot_lookback': self.pivot_lookback,
+            'touch_pct': self.touch_pct,
+            'vol_confirm_ratio': self.vol_confirm_ratio,
         }
-    
+
     def update_config(self, params: Dict[str, Any]) -> None:
-        if "lookback_seconds" in params:
-            self.lookback_seconds = int(params["lookback_seconds"])
-        if "cluster_tolerance_pct" in params:
-            self.cluster_tolerance_pct = float(params["cluster_tolerance_pct"])
-        if "min_touches" in params:
-            self.min_touches = int(params["min_touches"])
-        if "rejection_pct" in params:
-            self.rejection_pct = float(params["rejection_pct"])
+        if 'pivot_lookback' in params:
+            self.pivot_lookback = int(params['pivot_lookback'])
+        if 'touch_pct' in params:
+            self.touch_pct = float(params['touch_pct'])
+        if 'vol_confirm_ratio' in params:
+            self.vol_confirm_ratio = float(params['vol_confirm_ratio'])
