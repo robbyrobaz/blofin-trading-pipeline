@@ -38,9 +38,13 @@ class UniversalMLTrainer:
             print(f"✗ Not enough features: {len(feature_cols)}")
             return 0
         
-        # Prepare X, y
+        # Prepare X, y — preserve chronological order for temporal split below
         X = df[feature_cols].fillna(0)
-        X = StandardScaler().fit_transform(X)
+        # Fit scaler on training portion only (first 80%) to avoid look-ahead bias
+        split_idx = int(len(X) * 0.8)
+        scaler = StandardScaler()
+        scaler.fit(X.iloc[:split_idx])
+        X = scaler.transform(X)
         
         if 'target_direction' in df.columns:
             y_direction = df['target_direction'].fillna(0)
@@ -81,89 +85,103 @@ class UniversalMLTrainer:
         
         return features
     
+    @staticmethod
+    def _temporal_split(X, y, test_size=0.2):
+        """Chronological split — no shuffle — to prevent future data leaking into training."""
+        split_idx = int(len(X) * (1.0 - test_size))
+        if hasattr(X, 'iloc'):
+            X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+        else:
+            X_train, X_test = X[:split_idx], X[split_idx:]
+        if hasattr(y, 'iloc'):
+            y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+        else:
+            y_train, y_test = y[:split_idx], y[split_idx:]
+        return X_train, X_test, y_train, y_test
+
     def _train_direction_model(self, X, y, feature_cols):
         """Train direction classifier."""
         try:
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-            
+            X_train, X_test, y_train, y_test = self._temporal_split(X, y)
+
             model = RandomForestClassifier(n_estimators=10, max_depth=5, random_state=42)
             model.fit(X_train, y_train)
-            
+
             y_pred = model.predict(X_test)
             acc = accuracy_score(y_test, y_pred)
-            
+
             self._save_model('direction_predictor', model, acc, {'accuracy': acc})
             print(f"  ✓ Direction: {acc:.2%}")
             return 1
         except Exception as e:
             print(f"  ✗ Direction: {e}")
             return 0
-    
+
     def _train_volatility_model(self, X, y, feature_cols):
         """Train volatility regressor."""
         try:
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-            
+            X_train, X_test, y_train, y_test = self._temporal_split(X, y)
+
             model = GradientBoostingRegressor(n_estimators=10, max_depth=3, random_state=42)
             model.fit(X_train, y_train)
-            
+
             y_pred = model.predict(X_test)
             rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-            
+
             self._save_model('volatility_regressor', model, rmse, {'rmse': rmse})
             print(f"  ✓ Volatility: RMSE={rmse:.4f}")
             return 1
         except Exception as e:
             print(f"  ✗ Volatility: {e}")
             return 0
-    
+
     def _train_price_model(self, X, y, feature_cols):
         """Train price predictor."""
         try:
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-            
+            X_train, X_test, y_train, y_test = self._temporal_split(X, y)
+
             model = GradientBoostingRegressor(n_estimators=10, max_depth=3, random_state=42)
             model.fit(X_train, y_train)
-            
+
             y_pred = model.predict(X_test)
             rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-            
+
             self._save_model('price_predictor', model, rmse, {'rmse': rmse})
             print(f"  ✓ Price: RMSE={rmse:.2f}")
             return 1
         except Exception as e:
             print(f"  ✗ Price: {e}")
             return 0
-    
+
     def _train_momentum_model(self, X, y, feature_cols):
         """Train momentum classifier."""
         try:
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-            
+            X_train, X_test, y_train, y_test = self._temporal_split(X, y)
+
             model = RandomForestClassifier(n_estimators=10, max_depth=5, random_state=42)
             model.fit(X_train, y_train)
-            
+
             y_pred = model.predict(X_test)
             acc = accuracy_score(y_test, y_pred)
-            
+
             self._save_model('momentum_classifier', model, acc, {'accuracy': acc})
             print(f"  ✓ Momentum: {acc:.2%}")
             return 1
         except Exception as e:
             print(f"  ✗ Momentum: {e}")
             return 0
-    
+
     def _train_generic_model(self, X, y, name, feature_cols):
         """Train generic model."""
         try:
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-            
+            X_train, X_test, y_train, y_test = self._temporal_split(X, y)
+
             model = RandomForestClassifier(n_estimators=10, max_depth=5, random_state=42)
             model.fit(X_train, y_train)
-            
+
             y_pred = model.predict(X_test)
             acc = accuracy_score(y_test, y_pred)
-            
+
             self._save_model(name, model, acc, {'accuracy': acc})
             print(f"  ✓ {name}: {acc:.2%}")
             return 1

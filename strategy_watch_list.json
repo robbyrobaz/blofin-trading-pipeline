@@ -1,0 +1,242 @@
+{
+  "last_updated": "2026-02-17T04:10:00Z",
+  "updated_by": "strategy_adjuster",
+  "run_context": "Evening run (21:10 MST / 04:10 UTC) - 2026-02-16",
+  
+  "market_regime": {
+    "current": "ranging_low_volatility",
+    "duration_days": 4,
+    "implication": "Mean-reversion strategies outperform. Breakout/momentum strategies struggle."
+  },
+
+  "watch_list": [
+    {
+      "id": "breakout_v2",
+      "strategy_name": "breakout_v2",
+      "file": "/home/rob/.openclaw/workspace/blofin-stack/strategies/breakout_v2.py",
+      "source": "sonnet_tuner",
+      "added_date": "2026-02-17T04:10:00Z",
+      "status": "READY_FOR_LIVE_TEST",
+      "tuning_source": "strategy_configs DB - multiple Sonnet tuning passes on breakout",
+      "key_improvements": [
+        "buffer_pct increased from 0.18% to 0.75% (filters noise breakouts)",
+        "lookback_seconds increased from 900s to 3600s (1h reference window)",
+        "UTC 2:00 hour filter added (eliminates known loss cluster)",
+        "Volume confirmation filter added (volume > avg * 1.2)",
+        "Asymmetric BUY/SELL thresholds (SELL requires 1.5x buffer)"
+      ],
+      "original_strategy_performance": {
+        "24h_win_rate": "25.1%",
+        "48h_sharpe_avg": -0.522,
+        "paper_trade_wr_24h": "38.7%",
+        "paper_trade_avg_pnl": "-0.14%",
+        "disable_reason": "WR < 35% for > 24h in strategy_scores"
+      },
+      "target_metrics": {
+        "min_win_rate": "52%",
+        "min_sharpe": 0.0,
+        "min_trades_for_validation": 50
+      },
+      "backtest_result": {
+        "status": "NOT_BACKTESTED",
+        "note": "breakout_v2 uses same detect() interface as live system. Needs live test period (48-72h monitoring)."
+      },
+      "action_required": "Deploy for 72h paper trade monitoring before promoting to full live status"
+    },
+    {
+      "id": "strategy_025_vol_volume_reversion",
+      "strategy_name": "vol_volume_reversion",
+      "file": "/home/rob/.openclaw/workspace/blofin-stack/strategies/strategy_025.py",
+      "source": "opus_designer",
+      "added_date": "2026-02-17T04:10:00Z",
+      "status": "NOT_READY_NEEDS_TUNING",
+      "designed_for_regime": "ranging_low_volatility",
+      "backtest_result": {
+        "status": "FAILED_NO_SIGNALS",
+        "trades_generated": 0,
+        "test_period": "5 days BTC-USDT 5m candles",
+        "ticks_available": "25.1M"
+      },
+      "failure_analysis": {
+        "primary_issue": "RSI < 35 AND 2+ consecutive volume spikes required simultaneously",
+        "rsi_below_35_rate": "15.5% of 5m candles",
+        "volume_spike_rate_estimated": "~10% of candles",
+        "joint_probability": "~1.5% → too rare for useful trading",
+        "secondary_issue": "price_distance_ratio < 0.05 (within 5% of VWMA) adds third condition"
+      },
+      "tuning_required": [
+        {"param": "rsi_period", "current": 14, "suggested": 14, "note": "OK"},
+        {"param": "RSI thresholds in logic", "current": "rsi < 35", "suggested": "rsi < 45", "note": "Increase oversold threshold by 10pts"},
+        {"param": "volume_surge_threshold", "current": 1.5, "suggested": 1.3, "note": "Reduce volume requirement"},
+        {"param": "min_vol_spike_bars", "current": 2, "suggested": 1, "note": "Require only 1 spike bar, not 2"},
+        {"param": "vol_expansion_threshold", "current": 1.3, "suggested": 1.15, "note": "Slightly lower volatility expansion needed"}
+      ],
+      "target_after_tuning": {
+        "min_signal_rate": "5% of candles",
+        "min_win_rate_for_promotion": "52%"
+      }
+    },
+    {
+      "id": "strategy_023_volatility_expansion_volume_breakout",
+      "strategy_name": "volatility_expansion_volume_breakout",
+      "file": "/home/rob/.openclaw/workspace/blofin-stack/strategies/strategy_023.py",
+      "source": "opus_designer",
+      "added_date": "2026-02-17T04:10:00Z",
+      "status": "NOT_READY_NEEDS_TUNING",
+      "designed_for_regime": "ranging_low_volatility",
+      "backtest_result": {
+        "status": "FAILED_NO_SIGNALS",
+        "trades_generated": 0,
+        "test_period": "5 days BTC-USDT 5m candles"
+      },
+      "failure_analysis": {
+        "primary_issue": "breakout_threshold=0.015 (1.5%) is too large for 5-minute crypto data",
+        "breakout_threshold_note": "BTC needs a 1.5% move in 5min to trigger = very rare in ranging market",
+        "secondary_issue": "volume_multiplier=1.8 AND min_volume_bars=3 = 3 consecutive volume surge bars needed",
+        "tertiary_issue": "volatility_percentile=15 (must be in bottom 15% volatility) further restricts"
+      },
+      "tuning_required": [
+        {"param": "breakout_threshold", "current": 0.015, "suggested": 0.003, "note": "Reduce from 1.5% to 0.3% for 5m data"},
+        {"param": "volume_multiplier", "current": 1.8, "suggested": 1.3, "note": "Lower volume bar"},
+        {"param": "min_volume_bars", "current": 3, "suggested": 1, "note": "Require only 1 surge bar"},
+        {"param": "volatility_percentile", "current": 15, "suggested": 30, "note": "More permissive volatility gate"}
+      ],
+      "target_after_tuning": {
+        "min_signal_rate": "3% of candles",
+        "min_win_rate_for_promotion": "52%"
+      }
+    }
+  ],
+
+  "live_strategy_summary": {
+    "as_of": "2026-02-17T04:10:00Z",
+    "total_strategies": 8,
+    "strategies": [
+      {
+        "name": "bb_squeeze",
+        "status": "ACTIVE",
+        "paper_trade_wr_24h": "45.3%",
+        "paper_trade_avg_pnl": "-0.03%",
+        "strategy_score_24h_wr": "36.3%",
+        "sharpe_48h_avg": -0.250,
+        "flag": "FLAG_SHARPE",
+        "note": "Best paper WR. Key finding: band_width_pct >= 0.5% correlates with wins"
+      },
+      {
+        "name": "momentum",
+        "status": "DISABLED",
+        "paper_trade_wr_24h": "43.7%",
+        "paper_trade_avg_pnl": "+0.05%",
+        "strategy_score_24h_wr": "30.9%",
+        "sharpe_48h_avg": -0.292,
+        "flag": "PRUNE_WR",
+        "note": "CONFLICT: paper trades positive but strategy_scores below threshold. Re-evaluate in 24h. Config: window=180s, up_pct=0.8"
+      },
+      {
+        "name": "reversal",
+        "status": "DISABLED",
+        "paper_trade_wr_24h": "42.8%",
+        "paper_trade_avg_pnl": "-0.07%",
+        "strategy_score_24h_wr": "34.8%",
+        "sharpe_48h_avg": -0.280,
+        "flag": "PRUNE_WR",
+        "note": "BORDERLINE. Paper trades show decent WR. Config: lookback=900s, bounce_pct=0.55. Re-evaluate in 24h."
+      },
+      {
+        "name": "candle_patterns",
+        "status": "ACTIVE",
+        "paper_trade_wr_24h": "41.9%",
+        "paper_trade_avg_pnl": "-0.11%",
+        "strategy_score_24h_wr": "38.0%",
+        "sharpe_48h_avg": -0.228,
+        "flag": "FLAG_SHARPE",
+        "note": "Highest signal volume (6600/day). Acceptable WR but negative pnl."
+      },
+      {
+        "name": "rsi_divergence",
+        "status": "ACTIVE",
+        "paper_trade_wr_24h": "36.4%",
+        "paper_trade_avg_pnl": "-0.22%",
+        "strategy_score_24h_wr": "45.4%",
+        "sharpe_48h_avg": -0.225,
+        "flag": "FLAG_SHARPE",
+        "note": "SELL signals failing (35.3% WR). BUY signals decent (44.5%). Disable SELL in ranging regime."
+      },
+      {
+        "name": "support_resistance",
+        "status": "ACTIVE",
+        "paper_trade_wr_24h": "39.7%",
+        "paper_trade_avg_pnl": "-0.16%",
+        "strategy_score_24h_wr": "36.8%",
+        "sharpe_48h_avg": -0.233,
+        "flag": "FLAG_SHARPE",
+        "note": "High volume (6434 signals/day). WR acceptable but pnl negative."
+      },
+      {
+        "name": "vwap_reversion",
+        "status": "ACTIVE",
+        "paper_trade_wr_24h": "38.4%",
+        "paper_trade_avg_pnl": "-0.18%",
+        "strategy_score_24h_wr": "42.4%",
+        "sharpe_48h_avg": -0.078,
+        "flag": "MONITOR",
+        "note": "CRITICAL: Signals firing at 0.4% deviation but config says 1.2%. ENV VAR mismatch suspected. Higher deviation (>=0.5%) shows better WR (41.6% vs 37.5%)."
+      },
+      {
+        "name": "breakout",
+        "status": "DISABLED",
+        "paper_trade_wr_24h": "38.7%",
+        "paper_trade_avg_pnl": "-0.14%",
+        "strategy_score_24h_wr": "25.1%",
+        "sharpe_48h_avg": -0.522,
+        "flag": "PRUNE_WR",
+        "note": "Clearly below 35% WR in strategy_scores. breakout_v2.py is replacement candidate."
+      }
+    ]
+  },
+
+  "parameter_rotation_results": {
+    "run_date": "2026-02-17",
+    "bb_squeeze": {
+      "current_config": {"lookback_seconds": 1200},
+      "finding": "band_width_pct >= 0.5% correlates with winning trades",
+      "recommended_change": "Add min_band_width_pct=0.50 filter",
+      "expected_impact": "Reduce signals 30%, improve WR from 45% to estimated 50-55%",
+      "status": "PENDING_IMPLEMENTATION"
+    },
+    "momentum": {
+      "current_config": {"window_seconds": 180, "up_pct": 0.8, "down_pct": -0.8},
+      "finding": "Actual signals trigger at 0.65-0.78% change_pct (below 0.8% config)",
+      "finding_2": "All signals at conf=0.99 (no differentiation)",
+      "recommended_change": "Increase up_pct/down_pct to 1.0%",
+      "expected_impact": "Reduce signals 40%, improve WR from 41% to estimated 48-52%",
+      "status": "PENDING_IMPLEMENTATION (disabled - test after re-enable)"
+    },
+    "reversal": {
+      "current_config": {"lookback_seconds": 900, "bounce_pct": 0.55},
+      "finding": "reject_pct not predictive of outcome (0.35-0.69% range shows similar WR)",
+      "recommended_change": "Add volume confirmation: require volume > avg*1.2 at reversal point",
+      "expected_impact": "Filter ~20% of signals, improve WR selectivity",
+      "status": "PENDING_IMPLEMENTATION (disabled - test after re-enable)"
+    }
+  },
+
+  "librarian_requests": [
+    {
+      "request": "Create strategy_scores.json knowledge base file",
+      "path": "/home/rob/.openclaw/workspace/blofin-stack/strategy_scores.json",
+      "urgency": "HIGH",
+      "reason": "Adjuster cannot use Librarian research without this file. Currently falling back to DB directly."
+    },
+    {
+      "request": "Evaluate strategy_025 and strategy_023 parameter tuning",
+      "urgency": "MED",
+      "reason": "Both generated by Opus for current regime but thresholds too restrictive. Tune and add to library."
+    },
+    {
+      "request": "Investigate ranging market strategies",
+      "urgency": "MED",
+      "reason": "All 8 live strategies showing negative Sharpe. Need mean-reversion candidates designed for 0.1-0.5% tick range."
+    }
+  ]
+}

@@ -29,7 +29,9 @@ class BacktestEngine:
         days_back: int = 7,
         db_path: str = 'data/blofin_monitor.db',
         initial_capital: float = 10000.0,
-        limit_rows: int = None
+        limit_rows: int = None,
+        test_split_pct: float = 0.3,
+        embargo_hours: float = 24.0,
     ):
         """
         Initialize backtester.
@@ -39,16 +41,59 @@ class BacktestEngine:
             days_back: Number of days of historical data to load
             db_path: Path to SQLite database
             initial_capital: Starting capital for backtest
+            limit_rows: Max tick rows to load (None = no limit)
+            test_split_pct: Fraction of data held out as test set (default 0.3 = 30%).
+                P3 FIX: Enforce temporal split to prevent data leakage.
+                Training data is the first (1-test_split_pct) fraction of ticks.
+                Test data is the final test_split_pct fraction, with embargo_hours
+                gap between train cutoff and test start.
+            embargo_hours: Hours of data to skip between train and test periods
+                (prevents look-ahead leakage from overlapping feature windows).
         """
         self.symbol = symbol
         self.days_back = days_back
         self.db_path = db_path
         self.initial_capital = initial_capital
         self.limit_rows = limit_rows
+        self.test_split_pct = max(0.1, min(0.5, test_split_pct))  # clamp 10%-50%
+        self.embargo_hours = max(0.0, embargo_hours)
         
         # Load historical data
         self.ticks = self._load_ticks()
         self.ohlcv_1m = aggregate_ticks_to_1m_ohlcv(self.ticks)
+        
+        # P3 FIX: Apply temporal train/test split with embargo
+        # This prevents data leakage where future prices influence the backtest
+        self._train_ticks, self._test_ticks = self._temporal_split(self.ticks)
+        self._train_ohlcv_1m = aggregate_ticks_to_1m_ohlcv(self._train_ticks)
+        self._test_ohlcv_1m  = aggregate_ticks_to_1m_ohlcv(self._test_ticks)
+
+    def _temporal_split(self, ticks):
+        """
+        P3 FIX: Split ticks into train/test with temporal ordering + embargo gap.
+        
+        Returns (train_ticks, test_ticks) where:
+        - train_ticks = first (1-test_split_pct) of the timeline
+        - test_ticks  = final test_split_pct after embargo_hours gap
+        - No overlap, no future data leaking into training
+        """
+        if not ticks:
+            return [], []
+        
+        n = len(ticks)
+        split_idx = int(n * (1.0 - self.test_split_pct))
+        
+        if split_idx <= 0 or split_idx >= n:
+            return ticks, []
+        
+        train_cutoff_ms = ticks[split_idx - 1].get('ts_ms', 0)
+        embargo_ms = int(self.embargo_hours * 3600 * 1000)
+        test_start_ms = train_cutoff_ms + embargo_ms
+        
+        train_ticks = ticks[:split_idx]
+        test_ticks  = [t for t in ticks[split_idx:] if t.get('ts_ms', 0) >= test_start_ms]
+        
+        return train_ticks, test_ticks
         
     def _load_ticks(self) -> List[Dict[str, Any]]:
         """Load tick data from database."""

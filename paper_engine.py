@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import json
+import logging
 import os
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +12,7 @@ from dotenv import load_dotenv
 from db import connect, init_db, upsert_heartbeat
 
 ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
 load_dotenv(ROOT / '.env')
 
 DB_PATH = os.getenv('BLOFIN_DB_PATH', str(ROOT / 'data' / 'blofin_monitor.db'))
@@ -25,6 +28,34 @@ LOOP_SECONDS = int(os.getenv('PAPER_LOOP_SECONDS', '15'))
 PAPER_FEE_PCT_PER_SIDE = float(os.getenv('PAPER_FEE_PCT_PER_SIDE', '0.04'))
 PAPER_SLIPPAGE_PCT_PER_SIDE = float(os.getenv('PAPER_SLIPPAGE_PCT_PER_SIDE', '0.02'))
 
+# ML entry gate: minimum win-probability from entry classifier to allow confirmation.
+# Set to 0.0 to disable the ML gate (fall through to strategy-count logic only).
+ML_ENTRY_MIN_PROB = float(os.getenv('ML_ENTRY_MIN_PROB', '0.0'))
+
+# Lazy-load entry classifier once on first use.
+_entry_classifier = None
+_entry_classifier_loaded = False
+
+
+def _get_entry_classifier():
+    """Load entry classifier on first call; return None if not available."""
+    global _entry_classifier, _entry_classifier_loaded
+    if _entry_classifier_loaded:
+        return _entry_classifier
+    _entry_classifier_loaded = True
+    try:
+        from ml_pipeline.models.entry_classifier import EntryClassifier
+        ec = EntryClassifier.try_load(str(ROOT / 'models' / 'entry_classifier'))
+        if ec is not None:
+            logging.info('ML entry classifier loaded')
+        else:
+            logging.info('ML entry classifier not found — ML gate disabled')
+        _entry_classifier = ec
+    except Exception as e:
+        logging.warning(f'Failed to load entry classifier: {e}')
+        _entry_classifier = None
+    return _entry_classifier
+
 
 def now_ms():
     return int(time.time() * 1000)
@@ -38,7 +69,7 @@ def maybe_confirm_signals(con):
     t = now_ms()
     cutoff = t - CONFIRM_WINDOW_MIN * 60_000
     rows = con.execute(
-        'SELECT id,ts_ms,ts_iso,symbol,signal,strategy,confidence,price FROM signals WHERE ts_ms >= ? ORDER BY ts_ms DESC',
+        'SELECT id,ts_ms,ts_iso,symbol,signal,strategy,confidence,price,details_json FROM signals WHERE ts_ms >= ? ORDER BY ts_ms DESC',
         (cutoff,),
     ).fetchall()
 
@@ -46,6 +77,8 @@ def maybe_confirm_signals(con):
     for r in rows:
         key = (r['symbol'], r['signal'])
         grouped.setdefault(key, []).append(r)
+
+    ec = _get_entry_classifier() if ML_ENTRY_MIN_PROB > 0.0 else None
 
     inserted = 0
     for (symbol, side), arr in grouped.items():
@@ -56,10 +89,37 @@ def maybe_confirm_signals(con):
         exists = con.execute('SELECT 1 FROM confirmed_signals WHERE signal_id=?', (top['id'],)).fetchone()
         if exists:
             continue
-        score = min(0.99, 0.5 + (len(strategies) * 0.15))
+
+        # Base score from strategy agreement count
+        base_score = min(0.99, 0.5 + (len(strategies) * 0.15))
+
+        # ML entry gate: if classifier is available and gate is enabled,
+        # incorporate win-probability and optionally skip low-confidence signals.
+        ml_prob = None
+        rationale_suffix = ''
+        if ec is not None:
+            try:
+                ml_prob = ec.predict_from_signal(
+                    strategy=top['strategy'],
+                    symbol=top['symbol'],
+                    side=top['signal'],
+                    confidence=float(top['confidence'] or 0.5),
+                    cs_score=base_score,
+                    details_json=top['details_json'],
+                    signal_ts_ms=int(top['ts_ms']),
+                )
+                if ml_prob < ML_ENTRY_MIN_PROB:
+                    continue  # ML gate rejected this signal
+                # Blend ML probability into score (weighted average, ML has 40% weight)
+                base_score = min(0.99, base_score * 0.6 + ml_prob * 0.4)
+                rationale_suffix = f' | ML win_prob={ml_prob:.2f}'
+            except Exception as e:
+                logging.warning(f'Entry classifier predict failed: {e}')
+
+        rationale = f'{len(strategies)} strategies agreed in {CONFIRM_WINDOW_MIN}m{rationale_suffix}'
         con.execute(
             'INSERT INTO confirmed_signals(signal_id,ts_ms,ts_iso,symbol,signal,score,rationale) VALUES(?,?,?,?,?,?,?)',
-            (top['id'], top['ts_ms'], top['ts_iso'], symbol, side, score, f'{len(strategies)} strategies agreed in {CONFIRM_WINDOW_MIN}m'),
+            (top['id'], top['ts_ms'], top['ts_iso'], symbol, side, base_score, rationale),
         )
         inserted += 1
     return inserted

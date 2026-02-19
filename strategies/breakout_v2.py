@@ -67,7 +67,7 @@ class BreakoutStrategy(BaseStrategy):
     def get_config(self) -> Dict[str, Any]:
         return {
             "lookback_seconds": 3600,
-            "buffer_pct": 1.2,
+            "buffer_pct": 0.75,
         }
     
     def update_config(self, params: Dict[str, Any]) -> None:

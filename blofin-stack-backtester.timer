@@ -1,0 +1,13 @@
+[Unit]
+Description=Blofin Stack Backtester Timer (every 2h)
+Requires=blofin-stack-backtester.service
+
+[Timer]
+# Run every 2 hours at :00 UTC
+OnCalendar=*-*-* 00,02,04,06,08,10,12,14,16,18,20,22:00:00
+Persistent=true
+# Stagger to avoid simultaneous startup with other timers
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

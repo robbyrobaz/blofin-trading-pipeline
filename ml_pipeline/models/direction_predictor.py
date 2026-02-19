@@ -22,7 +22,7 @@ class DirectionPredictor(BaseModel):
             model_type="xgboost"
         )
         self.feature_names = [
-            "close", "returns", "rsi_14", "macd", "macd_signal",
+            "rsi_14", "macd", "macd_signal",
             "macd_hist", "volume_sma", "volume_ratio"
         ]
         self.config = {
@@ -54,14 +54,31 @@ class DirectionPredictor(BaseModel):
         # Select features
         X_selected = X[self.feature_names] if isinstance(X, pd.DataFrame) else X
         
-        # Normalize features
+        # DATA LEAKAGE GUARD: Time-series data must be sorted chronologically before splitting.
+        # Using shuffle=False ensures the test set is strictly out-of-sample (future data).
+        # A random shuffle would leak future information into the training set.
+        MIN_SAMPLES = 50
+        if len(X_selected) < MIN_SAMPLES:
+            raise ValueError(
+                f"Insufficient training data for {self.model_name}: "
+                f"{len(X_selected)} samples (minimum {MIN_SAMPLES} required)"
+            )
+
+        # Normalize features (fit on training portion ONLY — use temporal index to split first)
+        split_idx = int(len(X_selected) * 0.8)
         self.scaler = StandardScaler()
-        X_scaled = self.scaler.fit_transform(X_selected)
-        
-        # Train/validation split
-        X_train, X_val, y_train, y_val = train_test_split(
-            X_scaled, y, test_size=0.2, random_state=42
-        )
+        # Fit scaler only on training data to avoid look-ahead bias
+        X_train_raw = X_selected.iloc[:split_idx] if hasattr(X_selected, 'iloc') else X_selected[:split_idx]
+        X_val_raw = X_selected.iloc[split_idx:] if hasattr(X_selected, 'iloc') else X_selected[split_idx:]
+        y_train = y.iloc[:split_idx] if hasattr(y, 'iloc') else y[:split_idx]
+        y_val = y.iloc[split_idx:] if hasattr(y, 'iloc') else y[split_idx:]
+        self.scaler.fit(X_train_raw)
+        X_scaled = self.scaler.transform(X_selected.iloc[:] if hasattr(X_selected, 'iloc') else X_selected)
+        X_train = X_scaled[:split_idx]
+        X_val = X_scaled[split_idx:]
+
+        # NOTE: train_test_split with shuffle=False is equivalent to the above temporal split,
+        # but we use manual indexing to guarantee chronological order regardless of index.
         
         # Train XGBoost
         self.model = xgb.XGBClassifier(
@@ -88,6 +105,20 @@ class DirectionPredictor(BaseModel):
         f1 = f1_score(y_val, y_pred_val, average='binary', zero_division=0)
         precision = precision_score(y_val, y_pred_val, average='binary', zero_division=0)
         recall = recall_score(y_val, y_pred_val, average='binary', zero_division=0)
+
+        # DATA LEAKAGE QUARANTINE: F1 ≥ 0.95 on a non-trivial dataset is a red flag.
+        # Log a strong warning and tag the model as suspect rather than silently trust it.
+        if f1 >= 0.95 and len(y_val) > 10:
+            import logging
+            logging.warning(
+                f"[QUARANTINE] {self.model_name}: F1={f1:.4f} ≥ 0.95 on {len(y_val)} test samples. "
+                f"Possible data leakage — verify temporal split and feature set. "
+                f"train_size={len(y_train)}, test_size={len(y_val)}"
+            )
+            print(
+                f"  ⚠️  QUARANTINE WARNING: {self.model_name} F1={f1:.4f} ≥ 0.95 "
+                f"({len(y_val)} test samples). Suspected data leakage — review features!"
+            )
         
         # Get feature importance
         feature_importance = dict(zip(

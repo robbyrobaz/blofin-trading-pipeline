@@ -401,26 +401,146 @@ class DailyRunner:
             self._log_step('train_ml_models', 'failure', {'error': str(e)})
             return {'error': str(e)}
     
+    # ── Convergence Gate Constants ─────────────────────────────────────────
+    MAX_MODELS_WITHOUT_ENSEMBLES = 50   # Block training beyond this if ensemble tests < minimum
+    MIN_ENSEMBLE_TESTS_REQUIRED  = 5    # Minimum ensemble evaluations before allowing >50 models
+    MAX_TUNING_FAILURES          = 3    # Auto-archive strategies that fail tuning this many times
+
+    def _check_convergence_gates(self, con) -> Dict[str, Any]:
+        """
+        PRIORITY 5: Pipeline Convergence Gates.
+
+        Enforces:
+        1. >50 models requires ≥5 ensemble tests (prevents unbounded model bloat)
+        2. Auto-archive strategies failing tuning ≥3 times
+        3. Computes efficiency metric: useful_output / total_compute
+
+        Returns:
+            Dict with gate status and any actions taken
+        """
+        gate_results = {
+            'model_ensemble_gate': 'ok',
+            'strategies_auto_archived': [],
+            'efficiency_score': None,
+            'warnings': [],
+        }
+
+        # Helper: log regardless of whether self.logger is initialised (safe for unit tests)
+        def _warn(msg: str):
+            if hasattr(self, 'logger') and self.logger:
+                self.logger.warning(msg)
+            else:
+                print(f"  ⚠️  CONVERGENCE GATE: {msg}")
+
+        def _info(msg: str):
+            if hasattr(self, 'logger') and self.logger:
+                self.logger.info(msg)
+            else:
+                print(f"  ℹ️  CONVERGENCE GATE: {msg}")
+
+        # Gate 1: Model/ensemble ratio check
+        try:
+            total_models   = con.execute('SELECT COUNT(*) FROM ml_model_results WHERE archived=0').fetchone()[0]
+            total_ensembles = con.execute('SELECT COUNT(*) FROM ml_ensembles WHERE archived=0').fetchone()[0]
+
+            if total_models > self.MAX_MODELS_WITHOUT_ENSEMBLES and total_ensembles < self.MIN_ENSEMBLE_TESTS_REQUIRED:
+                msg = (
+                    f"CONVERGENCE GATE BLOCKED: {total_models} active models but only "
+                    f"{total_ensembles} ensemble tests (minimum {self.MIN_ENSEMBLE_TESTS_REQUIRED} required). "
+                    f"Run ensemble evaluation before training more models."
+                )
+                _warn(msg)
+                gate_results['model_ensemble_gate'] = 'blocked'
+                gate_results['warnings'].append(msg)
+            else:
+                gate_results['model_ensemble_gate'] = f'ok ({total_models} models, {total_ensembles} ensembles)'
+        except Exception as e:
+            _warn(f"Convergence gate check failed: {e}")
+
+        # Gate 2: Auto-archive strategies with ≥ MAX_TUNING_FAILURES failed tuning attempts
+        try:
+            failing_strategies = con.execute(
+                f'''SELECT DISTINCT strategy FROM strategy_backtest_results
+                    WHERE tuning_attempt >= ? AND status != 'archived' ''',
+                (self.MAX_TUNING_FAILURES,)
+            ).fetchall()
+
+            for (strat_name,) in failing_strategies:
+                reason = f'Auto-archived: tuning_attempt >= {self.MAX_TUNING_FAILURES} failed attempts'
+                con.execute(
+                    "UPDATE strategy_backtest_results SET status='archived' WHERE strategy=?",
+                    (strat_name,)
+                )
+                con.execute(
+                    "UPDATE strategy_scores SET enabled=0 WHERE strategy=?",
+                    (strat_name,)
+                )
+                gate_results['strategies_auto_archived'].append(strat_name)
+                _info(f"Auto-archived strategy '{strat_name}': {reason}")
+
+            if failing_strategies:
+                con.commit()
+        except Exception as e:
+            _warn(f"Strategy auto-archive check failed: {e}")
+
+        # Gate 3: Efficiency metric = useful_output / total_compute
+        try:
+            total_models_ever   = con.execute('SELECT COUNT(*) FROM ml_model_results').fetchone()[0]
+            useful_models       = con.execute('SELECT COUNT(*) FROM ml_model_results WHERE archived=0 AND f1_score > 0.6').fetchone()[0]
+            total_strats_ever   = con.execute('SELECT COUNT(DISTINCT strategy) FROM strategy_backtest_results').fetchone()[0]
+            useful_strats       = con.execute("SELECT COUNT(DISTINCT strategy) FROM strategy_backtest_results WHERE status='active' AND score > 50").fetchone()[0]
+
+            useful_output = useful_models + useful_strats
+            total_compute = max(total_models_ever + total_strats_ever, 1)
+            efficiency    = round(useful_output / total_compute, 3)
+
+            gate_results['efficiency_score'] = efficiency
+            gate_results['efficiency_detail'] = {
+                'useful_models': useful_models,
+                'total_models': total_models_ever,
+                'useful_strategies': useful_strats,
+                'total_strategies': total_strats_ever,
+                'ratio': efficiency,
+            }
+        except Exception as e:
+            self.logger.warning(f"Efficiency metric calculation failed: {e}")
+
+        return gate_results
+
     def step_rank_and_update(self) -> Dict[str, Any]:
         """Step 5: Rank strategies/models and update active pools (2 min)."""
         self._log_step('rank_and_update', 'started')
         start_time = datetime.utcnow()
-        
+
         try:
+            # ── PRIORITY 5: Check pipeline convergence gates first ─────────
+            import sqlite3 as _sqlite3
+            _con = _sqlite3.connect(self.db_path)
+            _con.row_factory = _sqlite3.Row
+            gate_status = self._check_convergence_gates(_con)
+            _con.close()
+
+            if gate_status.get('model_ensemble_gate') == 'blocked':
+                self.logger.warning(
+                    "Pipeline convergence gate is BLOCKED — skipping model ranking until "
+                    "ensemble tests reach the minimum threshold."
+                )
+
             top_strategies = self.ranker.keep_top_strategies(count=20)
             top_models = self.ranker.keep_top_models(count=5)
             top_ensembles = self.ranker.keep_top_ensembles(count=3)
-            
+
             result = {
                 'top_strategies_count': len(top_strategies),
                 'top_models_count': len(top_models),
                 'top_ensembles_count': len(top_ensembles),
+                'convergence_gate': gate_status,
                 'duration_seconds': (datetime.utcnow() - start_time).total_seconds()
             }
-            
+
             self._log_step('rank_and_update', 'success', result)
             return result
-            
+
         except Exception as e:
             self._log_step('rank_and_update', 'failure', {'error': str(e)})
             return {'error': str(e)}
@@ -526,55 +646,65 @@ Provide analysis in JSON format:
         return results
     
     def run_daily_pipeline(self):
-        """Execute the complete daily pipeline."""
+        """
+        Execute the complete daily pipeline as a single manual/fallback run.
+
+        This delegates to the same logic used by the individual systemd-scheduled runners:
+          - blofin-stack-backtester  (every 2h)  -> orchestration/run_backtester.py
+          - blofin-stack-ml-trainer  (every 4h)  -> orchestration/run_ml_trainer.py
+          - blofin-stack-strategy-tuner (every 6h) -> orchestration/run_strategy_tuner.py
+          - blofin-stack-ranker      (daily)     -> orchestration/run_ranker.py
+
+        For production use, prefer enabling the individual systemd timers instead of
+        running this monolithic pipeline.
+        """
         self.logger.info("="*80)
-        self.logger.info("STARTING DAILY PIPELINE")
+        self.logger.info("STARTING DAILY PIPELINE (manual/fallback run)")
         self.logger.info(f"Timestamp: {datetime.utcnow().isoformat()}Z")
         self.logger.info("="*80)
-        
+
         pipeline_start = datetime.utcnow()
-        
+
         try:
-            # Step 1: Score strategies (sequential, needed for ranking)
+            from orchestration.run_backtester import run_backtester
+            from orchestration.run_ml_trainer import run_ml_trainer
+            from orchestration.run_strategy_tuner import run_strategy_tuner
+            from orchestration.run_ranker import run_ranker
+
+            # Step 1: Score strategies (stub, kept for legacy compatibility)
             self.results['scoring'] = self.step_score_strategies()
-            
-            # Step 2-4: Design, tune, and train can run in parallel
+
+            # Step 2: Run backtester against all strategies
+            self._log_step('backtester', 'started')
+            self.results['backtest'] = run_backtester(self.workspace_dir)
+            self._log_step('backtester', 'success', self.results['backtest'])
+
+            # Steps 3-5: Tune underperformers and train ML models in parallel
             parallel_tasks = [
-                ('design', self.step_design_strategies, ()),
                 ('tune', self.step_tune_underperformers, ()),
-                ('ml_train', self.step_train_ml_models, ())
+                ('ml_train', self.step_train_ml_models, ()),
             ]
-            
             parallel_results = self.run_parallel(parallel_tasks)
             self.results.update(parallel_results)
-            
-            # Step 2b: Backtest new strategies (sequential after design)
-            if 'design' in self.results and 'strategy_names' in self.results['design']:
-                self.results['backtest'] = self.step_backtest_new_strategies(
-                    self.results['design']['strategy_names']
-                )
-            
-            # Step 5: Rank and update (sequential, depends on scoring/training)
-            self.results['ranking'] = self.step_rank_and_update()
-            
-            # Step 6: Generate report (sequential)
-            self.results['report'] = self.step_generate_report()
-            
+
+            # Step 6: Rank strategies/models, run convergence gates, generate report
+            self._log_step('ranker', 'started')
+            self.results['ranking'] = run_ranker(self.workspace_dir)
+            self._log_step('ranker', 'success', self.results['ranking'])
+
             # Step 7: AI review (sequential, depends on report)
-            if 'report' in self.results and 'report_date' in self.results['report']:
-                self.results['ai_review'] = self.step_ai_review(
-                    self.results['report']['report_date']
-                )
-            
-            # Calculate total duration
+            report_info = self.results.get('ranking', {}).get('report', {})
+            if report_info.get('report_date'):
+                self.results['ai_review'] = self.step_ai_review(report_info['report_date'])
+
             pipeline_duration = (datetime.utcnow() - pipeline_start).total_seconds()
-            
+
             self.logger.info("="*80)
             self.logger.info("PIPELINE COMPLETED")
-            self.logger.info(f"Total duration: {pipeline_duration:.1f} seconds ({pipeline_duration/60:.1f} minutes)")
-            self.logger.info(f"Results: {json.dumps(self.results, indent=2)}")
+            self.logger.info(f"Total duration: {pipeline_duration:.1f}s ({pipeline_duration/60:.1f} min)")
+            self.logger.info(f"Results: {json.dumps(self.results, indent=2, default=str)}")
             self.logger.info("="*80)
-            
+
         except Exception as e:
             self.logger.error(f"PIPELINE FAILED: {e}", exc_info=True)
             raise

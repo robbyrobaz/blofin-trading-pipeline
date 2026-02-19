@@ -1,0 +1,801 @@
+[
+  {
+    "strategy": "vwap_deviation",
+    "avg_win_rate": 0.5182236134170239,
+    "avg_sharpe": -0.11073845253495615,
+    "avg_pnl": -0.028801684499590474,
+    "avg_dd": 11.470343037395597,
+    "avg_trades": 83.5,
+    "n_symbols": 15,
+    "best_symbols": [
+      {
+        "strategy": "vwap_deviation",
+        "symbol": "ATOM-USDT",
+        "timeframe": "5m",
+        "hold_bars": 6,
+        "win_rate": 0.7166666666666667,
+        "avg_pnl": 0.22930437495810743,
+        "total_pnl": 13.758262497486445,
+        "sharpe": 1.5004751954896605,
+        "max_dd": 2.8532969939758885,
+        "n_trades": 60
+      },
+      {
+        "strategy": "vwap_deviation",
+        "symbol": "SEI-USDT",
+        "timeframe": "5m",
+        "hold_bars": 6,
+        "win_rate": 0.6481481481481481,
+        "avg_pnl": 0.24711274176814643,
+        "total_pnl": 13.344088055479908,
+        "sharpe": 2.0060465764106676,
+        "max_dd": 1.051063829787219,
+        "n_trades": 54
+      },
+      {
+        "strategy": "vwap_deviation",
+        "symbol": "SOL-USDT",
+        "timeframe": "5m",
+        "hold_bars": 6,
+        "win_rate": 0.5774647887323944,
+        "avg_pnl": 0.04704195841013749,
+        "total_pnl": 3.339979047119762,
+        "sharpe": 0.3095727073405582,
+        "max_dd": 6.181857433917133,
+        "n_trades": 71
+      }
+    ]
+  },
+  {
+    "strategy": "bb_mean_reversion",
+    "avg_win_rate": 0.4955820296487971,
+    "avg_sharpe": -0.27520487967366775,
+    "avg_pnl": -0.038868284837253214,
+    "avg_dd": 8.827617279209857,
+    "avg_trades": 94.36666666666666,
+    "n_symbols": 15,
+    "best_symbols": [
+      {
+        "strategy": "bb_mean_reversion",
+        "symbol": "SEI-USDT",
+        "timeframe": "5m",
+        "hold_bars": 6,
+        "win_rate": 0.5957446808510638,
+        "avg_pnl": 0.004974122529865221,
+        "total_pnl": 0.7013512767109962,
+        "sharpe": 0.04491331739885812,
+        "max_dd": 5.764268055221933,
+        "n_trades": 141
+      },
+      {
+        "strategy": "bb_mean_reversion",
+        "symbol": "AVAX-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5740740740740741,
+        "avg_pnl": 0.0671954362136104,
+        "total_pnl": 3.628553555534962,
+        "sharpe": 0.4720817192643856,
+        "max_dd": 4.31107565438688,
+        "n_trades": 54
+      },
+      {
+        "strategy": "bb_mean_reversion",
+        "symbol": "NOT-USDT",
+        "timeframe": "5m",
+        "hold_bars": 6,
+        "win_rate": 0.5563380281690141,
+        "avg_pnl": 0.06325328722458251,
+        "total_pnl": 8.981966785890716,
+        "sharpe": 0.45026609881151686,
+        "max_dd": 3.558014797804179,
+        "n_trades": 142
+      }
+    ]
+  },
+  {
+    "strategy": "rsi_mean_reversion_tight",
+    "avg_win_rate": 0.4910664498899793,
+    "avg_sharpe": -0.269054930587799,
+    "avg_pnl": -0.007492010469578183,
+    "avg_dd": 2.03823835887598,
+    "avg_trades": 8.117647058823529,
+    "n_symbols": 13,
+    "best_symbols": [
+      {
+        "strategy": "rsi_mean_reversion_tight",
+        "symbol": "ETH-USDT",
+        "timeframe": "5m",
+        "hold_bars": 6,
+        "win_rate": 0.7142857142857143,
+        "avg_pnl": 0.04255066569615451,
+        "total_pnl": 0.2978546598730816,
+        "sharpe": 0.4147933581062994,
+        "max_dd": 1.4793147213063467,
+        "n_trades": 7
+      },
+      {
+        "strategy": "rsi_mean_reversion_tight",
+        "symbol": "SOL-USDT",
+        "timeframe": "5m",
+        "hold_bars": 6,
+        "win_rate": 0.6666666666666666,
+        "avg_pnl": -0.043173562376726295,
+        "total_pnl": -0.2590413742603578,
+        "sharpe": -0.5371627023378038,
+        "max_dd": 1.2059089880193952,
+        "n_trades": 6
+      },
+      {
+        "strategy": "rsi_mean_reversion_tight",
+        "symbol": "SHIB-USDT",
+        "timeframe": "5m",
+        "hold_bars": 6,
+        "win_rate": 0.6428571428571429,
+        "avg_pnl": 0.2558507046775658,
+        "total_pnl": 3.5819098654859216,
+        "sharpe": 1.7534716295143549,
+        "max_dd": 1.1106466119278786,
+        "n_trades": 14
+      }
+    ]
+  },
+  {
+    "strategy": "zscore_mean_reversion",
+    "avg_win_rate": 0.4898933509942755,
+    "avg_sharpe": -0.3949831546836259,
+    "avg_pnl": -0.06088302636095296,
+    "avg_dd": 12.361669835040612,
+    "avg_trades": 127.73333333333333,
+    "n_symbols": 15,
+    "best_symbols": [
+      {
+        "strategy": "zscore_mean_reversion",
+        "symbol": "PEPE-USDT",
+        "timeframe": "5m",
+        "hold_bars": 6,
+        "win_rate": 0.5683060109289617,
+        "avg_pnl": -0.02675760712246337,
+        "total_pnl": -4.896642103410796,
+        "sharpe": -0.16140393881160545,
+        "max_dd": 18.3815389019506,
+        "n_trades": 183
+      },
+      {
+        "strategy": "zscore_mean_reversion",
+        "symbol": "SEI-USDT",
+        "timeframe": "5m",
+        "hold_bars": 6,
+        "win_rate": 0.5661375661375662,
+        "avg_pnl": 0.016833117965799255,
+        "total_pnl": 3.1814592955360594,
+        "sharpe": 0.16475220172239965,
+        "max_dd": 4.453843500192946,
+        "n_trades": 189
+      },
+      {
+        "strategy": "zscore_mean_reversion",
+        "symbol": "NOT-USDT",
+        "timeframe": "5m",
+        "hold_bars": 6,
+        "win_rate": 0.5454545454545454,
+        "avg_pnl": 0.05762115502412043,
+        "total_pnl": 10.77515598951052,
+        "sharpe": 0.44391923540581635,
+        "max_dd": 4.585352024601262,
+        "n_trades": 187
+      }
+    ]
+  },
+  {
+    "strategy": "bb_tight",
+    "avg_win_rate": 0.46686490215090404,
+    "avg_sharpe": -0.5559952435860265,
+    "avg_pnl": -0.0769483441583181,
+    "avg_dd": 15.749219108223985,
+    "avg_trades": 143.5,
+    "n_symbols": 15,
+    "best_symbols": [
+      {
+        "strategy": "bb_tight",
+        "symbol": "BTC-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5411764705882353,
+        "avg_pnl": 0.016383992113021686,
+        "total_pnl": 1.3926393296068433,
+        "sharpe": 0.1454011131004572,
+        "max_dd": 6.934336746575948,
+        "n_trades": 85
+      },
+      {
+        "strategy": "bb_tight",
+        "symbol": "SEI-USDT",
+        "timeframe": "5m",
+        "hold_bars": 6,
+        "win_rate": 0.5235849056603774,
+        "avg_pnl": -0.033214234116240596,
+        "total_pnl": -7.041417632643006,
+        "sharpe": -0.3262681544930217,
+        "max_dd": 6.441524163452143,
+        "n_trades": 212
+      },
+      {
+        "strategy": "bb_tight",
+        "symbol": "ETH-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5185185185185185,
+        "avg_pnl": -0.04124251011720791,
+        "total_pnl": -3.3406433194938407,
+        "sharpe": -0.25576726010976514,
+        "max_dd": 11.122265203367144,
+        "n_trades": 81
+      }
+    ]
+  },
+  {
+    "strategy": "stochastic_oscillator",
+    "avg_win_rate": 0.45075073775337327,
+    "avg_sharpe": -0.6690445064850112,
+    "avg_pnl": -0.0933615233885609,
+    "avg_dd": 17.849990520431724,
+    "avg_trades": 160.96666666666667,
+    "n_symbols": 15,
+    "best_symbols": [
+      {
+        "strategy": "stochastic_oscillator",
+        "symbol": "ADA-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5802469135802469,
+        "avg_pnl": -0.0017096189090771324,
+        "total_pnl": -0.13847913163524772,
+        "sharpe": -0.012080772099180624,
+        "max_dd": 9.422275173877804,
+        "n_trades": 81
+      },
+      {
+        "strategy": "stochastic_oscillator",
+        "symbol": "PYTH-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.575,
+        "avg_pnl": 0.09047826993132735,
+        "total_pnl": 7.238261594506188,
+        "sharpe": 0.5095672370587192,
+        "max_dd": 6.871251697114443,
+        "n_trades": 80
+      },
+      {
+        "strategy": "stochastic_oscillator",
+        "symbol": "SOL-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5,
+        "avg_pnl": -0.066204341512757,
+        "total_pnl": -6.752842834301214,
+        "sharpe": -0.45044301404363835,
+        "max_dd": 11.852032976257595,
+        "n_trades": 102
+      }
+    ]
+  },
+  {
+    "strategy": "cci_oscillator",
+    "avg_win_rate": 0.4420364978336556,
+    "avg_sharpe": -0.8936981009727525,
+    "avg_pnl": -0.11818731249903543,
+    "avg_dd": 20.87443648145812,
+    "avg_trades": 152.36666666666667,
+    "n_symbols": 15,
+    "best_symbols": [
+      {
+        "strategy": "cci_oscillator",
+        "symbol": "PEPE-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5308641975308642,
+        "avg_pnl": -0.13375210970526416,
+        "total_pnl": -10.833920886126396,
+        "sharpe": -0.5798763277391754,
+        "max_dd": 17.84378292745857,
+        "n_trades": 81
+      },
+      {
+        "strategy": "cci_oscillator",
+        "symbol": "ETH-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5227272727272727,
+        "avg_pnl": -0.08958084490783291,
+        "total_pnl": -7.883114351889296,
+        "sharpe": -0.661516646490667,
+        "max_dd": 10.63459983308456,
+        "n_trades": 88
+      },
+      {
+        "strategy": "cci_oscillator",
+        "symbol": "XRP-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5147058823529411,
+        "avg_pnl": -0.032080469493114654,
+        "total_pnl": -2.1814719255317963,
+        "sharpe": -0.23122850220791957,
+        "max_dd": 6.099748358351717,
+        "n_trades": 68
+      }
+    ]
+  },
+  {
+    "strategy": "rsi_mean_reversion_14",
+    "avg_win_rate": 0.42531847199669043,
+    "avg_sharpe": -0.7813314867605826,
+    "avg_pnl": -0.12050046348839469,
+    "avg_dd": 7.931894566637328,
+    "avg_trades": 38.333333333333336,
+    "n_symbols": 15,
+    "best_symbols": [
+      {
+        "strategy": "rsi_mean_reversion_14",
+        "symbol": "ETH-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5909090909090909,
+        "avg_pnl": 0.17347014912994427,
+        "total_pnl": 3.816343280858774,
+        "sharpe": 1.0597266147099653,
+        "max_dd": 2.53314606936517,
+        "n_trades": 22
+      },
+      {
+        "strategy": "rsi_mean_reversion_14",
+        "symbol": "PEPE-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.55,
+        "avg_pnl": 0.19728559911117943,
+        "total_pnl": 3.9457119822235884,
+        "sharpe": 0.9439845971754618,
+        "max_dd": 1.6175718849840268,
+        "n_trades": 20
+      },
+      {
+        "strategy": "rsi_mean_reversion_14",
+        "symbol": "ADA-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.55,
+        "avg_pnl": -0.04787606696450776,
+        "total_pnl": -0.9575213392901553,
+        "sharpe": -0.22655351426950152,
+        "max_dd": 6.642913330885235,
+        "n_trades": 20
+      }
+    ]
+  },
+  {
+    "strategy": "atr_breakout_2_0",
+    "avg_win_rate": 0.41370538220569414,
+    "avg_sharpe": -1.2420218843345965,
+    "avg_pnl": -0.2477969395177723,
+    "avg_dd": 10.538033014576145,
+    "avg_trades": 42.766666666666666,
+    "n_symbols": 15,
+    "best_symbols": [
+      {
+        "strategy": "atr_breakout_2_0",
+        "symbol": "ETH-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.6470588235294118,
+        "avg_pnl": -0.13249113894253428,
+        "total_pnl": -2.252349362023083,
+        "sharpe": -0.5959910339778206,
+        "max_dd": 5.79162938186876,
+        "n_trades": 17
+      },
+      {
+        "strategy": "atr_breakout_2_0",
+        "symbol": "BTC-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.6,
+        "avg_pnl": -0.3743416416780519,
+        "total_pnl": -5.615124625170778,
+        "sharpe": -1.8646026905110498,
+        "max_dd": 6.03672647517583,
+        "n_trades": 15
+      },
+      {
+        "strategy": "atr_breakout_2_0",
+        "symbol": "DOGE-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5555555555555556,
+        "avg_pnl": -0.12305222398741075,
+        "total_pnl": -2.2149400317733936,
+        "sharpe": -0.6032552422620134,
+        "max_dd": 6.870270058602921,
+        "n_trades": 18
+      }
+    ]
+  },
+  {
+    "strategy": "triple_ema",
+    "avg_win_rate": 0.41116427464975724,
+    "avg_sharpe": -0.8194817686609319,
+    "avg_pnl": -0.10444847127399602,
+    "avg_dd": 38.86417147649128,
+    "avg_trades": 321.93333333333334,
+    "n_symbols": 15,
+    "best_symbols": [
+      {
+        "strategy": "triple_ema",
+        "symbol": "JUP-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5094339622641509,
+        "avg_pnl": 0.003493946852406072,
+        "total_pnl": 0.7407167327100872,
+        "sharpe": 0.019568488772200125,
+        "max_dd": 11.765343248398356,
+        "n_trades": 212
+      },
+      {
+        "strategy": "triple_ema",
+        "symbol": "DOGE-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.47368421052631576,
+        "avg_pnl": -0.010311504545419212,
+        "total_pnl": -2.1551044499926153,
+        "sharpe": -0.07000737839900562,
+        "max_dd": 19.62317038679194,
+        "n_trades": 209
+      },
+      {
+        "strategy": "triple_ema",
+        "symbol": "JUP-USDT",
+        "timeframe": "5m",
+        "hold_bars": 6,
+        "win_rate": 0.4557823129251701,
+        "avg_pnl": -0.035118095103764166,
+        "total_pnl": -15.487079940759997,
+        "sharpe": -0.24595733641976483,
+        "max_dd": 26.75665137514797,
+        "n_trades": 441
+      }
+    ]
+  },
+  {
+    "strategy": "atr_breakout_1_5",
+    "avg_win_rate": 0.40195575313141535,
+    "avg_sharpe": -1.0983564488353497,
+    "avg_pnl": -0.1628894748292151,
+    "avg_dd": 16.998705723178155,
+    "avg_trades": 91.76666666666667,
+    "n_symbols": 15,
+    "best_symbols": [
+      {
+        "strategy": "atr_breakout_1_5",
+        "symbol": "SOL-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5428571428571428,
+        "avg_pnl": -0.06673796881215685,
+        "total_pnl": -2.3358289084254897,
+        "sharpe": -0.2783635401242055,
+        "max_dd": 7.623397164437622,
+        "n_trades": 35
+      },
+      {
+        "strategy": "atr_breakout_1_5",
+        "symbol": "BTC-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5,
+        "avg_pnl": -0.2760396051335527,
+        "total_pnl": -9.937425784807896,
+        "sharpe": -1.8267526561293221,
+        "max_dd": 10.529537513643545,
+        "n_trades": 36
+      },
+      {
+        "strategy": "atr_breakout_1_5",
+        "symbol": "PEPE-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5,
+        "avg_pnl": 0.1767402746449923,
+        "total_pnl": 6.362649887219724,
+        "sharpe": 0.7953717894209646,
+        "max_dd": 3.8002709538414603,
+        "n_trades": 36
+      }
+    ]
+  },
+  {
+    "strategy": "ema_crossover_9_21",
+    "avg_win_rate": 0.39701751979628147,
+    "avg_sharpe": -1.2738289349280185,
+    "avg_pnl": -0.179550863589469,
+    "avg_dd": 13.23964372859528,
+    "avg_trades": 72.3,
+    "n_symbols": 15,
+    "best_symbols": [
+      {
+        "strategy": "ema_crossover_9_21",
+        "symbol": "ATOM-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5161290322580645,
+        "avg_pnl": 0.06238446458019008,
+        "total_pnl": 1.9339184019858924,
+        "sharpe": 0.5210622725991166,
+        "max_dd": 1.8110094919812312,
+        "n_trades": 31
+      },
+      {
+        "strategy": "ema_crossover_9_21",
+        "symbol": "XRP-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5121951219512195,
+        "avg_pnl": -0.030945794024060995,
+        "total_pnl": -1.2687775549865008,
+        "sharpe": -0.21242951066370583,
+        "max_dd": 5.4314081376101235,
+        "n_trades": 41
+      },
+      {
+        "strategy": "ema_crossover_9_21",
+        "symbol": "NOT-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5,
+        "avg_pnl": 0.07543923868524792,
+        "total_pnl": 2.866691070039421,
+        "sharpe": 0.48963947202336017,
+        "max_dd": 2.2258371856386923,
+        "n_trades": 38
+      }
+    ]
+  },
+  {
+    "strategy": "donchian_breakout_20",
+    "avg_win_rate": 0.38905179175578336,
+    "avg_sharpe": -1.0521165588272834,
+    "avg_pnl": -0.14946989969703792,
+    "avg_dd": 19.92275801445138,
+    "avg_trades": 111.86666666666666,
+    "n_symbols": 15,
+    "best_symbols": [
+      {
+        "strategy": "donchian_breakout_20",
+        "symbol": "JUP-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5072463768115942,
+        "avg_pnl": -0.1221294934285949,
+        "total_pnl": -8.426935046573048,
+        "sharpe": -0.6571964489909432,
+        "max_dd": 13.717222338186033,
+        "n_trades": 69
+      },
+      {
+        "strategy": "donchian_breakout_20",
+        "symbol": "WIF-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.4838709677419355,
+        "avg_pnl": -0.03527159562342426,
+        "total_pnl": -2.1868389286523042,
+        "sharpe": -0.21744529358046424,
+        "max_dd": 6.560583927868766,
+        "n_trades": 62
+      },
+      {
+        "strategy": "donchian_breakout_20",
+        "symbol": "XRP-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.46551724137931033,
+        "avg_pnl": 0.0274551329872753,
+        "total_pnl": 1.5923977132619673,
+        "sharpe": 0.1327443090253484,
+        "max_dd": 12.710688364629513,
+        "n_trades": 58
+      }
+    ]
+  },
+  {
+    "strategy": "macd_crossover",
+    "avg_win_rate": 0.3817316409831183,
+    "avg_sharpe": -1.3336565202711461,
+    "avg_pnl": -0.1755211408157198,
+    "avg_dd": 19.993236593177453,
+    "avg_trades": 118.03333333333333,
+    "n_symbols": 15,
+    "best_symbols": [
+      {
+        "strategy": "macd_crossover",
+        "symbol": "JUP-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5185185185185185,
+        "avg_pnl": 0.015339808152355309,
+        "total_pnl": 0.8283496402271867,
+        "sharpe": 0.08196560599293969,
+        "max_dd": 9.861188147657899,
+        "n_trades": 54
+      },
+      {
+        "strategy": "macd_crossover",
+        "symbol": "PYTH-USDT",
+        "timeframe": "5m",
+        "hold_bars": 6,
+        "win_rate": 0.4388888888888889,
+        "avg_pnl": -0.07492549525105123,
+        "total_pnl": -13.486589145189221,
+        "sharpe": -0.4710910374817512,
+        "max_dd": 18.374651197217027,
+        "n_trades": 180
+      },
+      {
+        "strategy": "macd_crossover",
+        "symbol": "ETH-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.43636363636363634,
+        "avg_pnl": -0.11576141484600054,
+        "total_pnl": -6.36687781653003,
+        "sharpe": -0.9808103488612586,
+        "max_dd": 8.182647314658908,
+        "n_trades": 55
+      }
+    ]
+  },
+  {
+    "strategy": "momentum_roc_5",
+    "avg_win_rate": 0.3699192322878867,
+    "avg_sharpe": -1.3720397746787965,
+    "avg_pnl": -0.2108488227928823,
+    "avg_dd": 21.48167208260442,
+    "avg_trades": 90.2,
+    "n_symbols": 15,
+    "best_symbols": [
+      {
+        "strategy": "momentum_roc_5",
+        "symbol": "JUP-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.4962962962962963,
+        "avg_pnl": -0.021788278822589505,
+        "total_pnl": -2.941417641049583,
+        "sharpe": -0.11311494497151058,
+        "max_dd": 14.324914528925726,
+        "n_trades": 135
+      },
+      {
+        "strategy": "momentum_roc_5",
+        "symbol": "ETH-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.4657534246575342,
+        "avg_pnl": -0.11631862636274555,
+        "total_pnl": -8.491259724480425,
+        "sharpe": -0.6897362970021688,
+        "max_dd": 10.98457883360697,
+        "n_trades": 73
+      },
+      {
+        "strategy": "momentum_roc_5",
+        "symbol": "PEPE-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.4634146341463415,
+        "avg_pnl": 0.009278527495492902,
+        "total_pnl": 1.1412588819456269,
+        "sharpe": 0.040634050604497436,
+        "max_dd": 15.693554230479107,
+        "n_trades": 123
+      }
+    ]
+  },
+  {
+    "strategy": "momentum_roc_10",
+    "avg_win_rate": 0.3653630191735077,
+    "avg_sharpe": -1.5035337941763551,
+    "avg_pnl": -0.23854505926766867,
+    "avg_dd": 18.19052111924747,
+    "avg_trades": 67.7,
+    "n_symbols": 15,
+    "best_symbols": [
+      {
+        "strategy": "momentum_roc_10",
+        "symbol": "JUP-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.48739495798319327,
+        "avg_pnl": -0.030815264308040696,
+        "total_pnl": -3.667016452656843,
+        "sharpe": -0.13686862620132448,
+        "max_dd": 13.159805939960666,
+        "n_trades": 119
+      },
+      {
+        "strategy": "momentum_roc_10",
+        "symbol": "DOGE-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.4657534246575342,
+        "avg_pnl": 0.04251284816849331,
+        "total_pnl": 3.1034379163000114,
+        "sharpe": 0.23143700091922953,
+        "max_dd": 13.75429949446031,
+        "n_trades": 73
+      },
+      {
+        "strategy": "momentum_roc_10",
+        "symbol": "BTC-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.4594594594594595,
+        "avg_pnl": -0.044463206221601194,
+        "total_pnl": -1.6451386301992441,
+        "sharpe": -0.28587875140914254,
+        "max_dd": 5.095091747872633,
+        "n_trades": 37
+      }
+    ]
+  },
+  {
+    "strategy": "ema_crossover_20_50",
+    "avg_win_rate": 0.36291650712305223,
+    "avg_sharpe": -1.6324969814446184,
+    "avg_pnl": -0.1930347238929176,
+    "avg_dd": 8.283957024900737,
+    "avg_trades": 34.36666666666667,
+    "n_symbols": 15,
+    "best_symbols": [
+      {
+        "strategy": "ema_crossover_20_50",
+        "symbol": "WIF-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5882352941176471,
+        "avg_pnl": 0.15191134442995294,
+        "total_pnl": 2.5824928553092,
+        "sharpe": 0.8794604244704287,
+        "max_dd": 1.2477124806727429,
+        "n_trades": 17
+      },
+      {
+        "strategy": "ema_crossover_20_50",
+        "symbol": "NOT-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5454545454545454,
+        "avg_pnl": 0.07343880606542369,
+        "total_pnl": 1.615653733439321,
+        "sharpe": 0.5154994315489733,
+        "max_dd": 2.009903638331574,
+        "n_trades": 22
+      },
+      {
+        "strategy": "ema_crossover_20_50",
+        "symbol": "PEPE-USDT",
+        "timeframe": "15m",
+        "hold_bars": 4,
+        "win_rate": 0.5,
+        "avg_pnl": -0.12435590626785427,
+        "total_pnl": -2.735829937892794,
+        "sharpe": -0.8261542824277222,
+        "max_dd": 4.675786998906622,
+        "n_trades": 22
+      }
+    ]
+  }
+]

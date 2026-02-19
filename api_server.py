@@ -136,14 +136,73 @@ def fetch_summary_data():
             win_rate = 0
             avg_pnl = 0
         
-        # Strategy scores (from backtested results in strategy_scores table)
+        # Strategy scores — optimizer results first, then library backtest data
         strategy_scores = []
+        optimizer_names = set()
+
+        # Import EEP scorer for live ranking
+        try:
+            import sys as _sys
+            _sys.path.insert(0, str(ROOT))
+            from eep_scorer import compute_eep_from_metrics as _eep_score, rank_by_eep as _rank_by_eep
+            _has_eep = True
+        except Exception:
+            _has_eep = False
+
+        # 1. Pull from optimizer_runs (highest priority)
+        try:
+            opt_row = con.execute(
+                'SELECT raw_json FROM optimizer_runs ORDER BY ts_ms DESC LIMIT 1'
+            ).fetchone()
+            if opt_row and opt_row[0]:
+                import json as _json
+                opt_data = _json.loads(opt_row[0])
+                raw_strats = opt_data.get('top_strategies', [])
+                # Score all with EEP and rank
+                if _has_eep:
+                    ranked_strats = _rank_by_eep(raw_strats)
+                else:
+                    ranked_strats = [dict(s, eep_rank=i+1, eep_score=0, gate_pass=True, gate_fails=[])
+                                     for i, s in enumerate(raw_strats)]
+                for s in ranked_strats:
+                    strat_name = s.get('strategy', 'unknown')
+                    optimizer_names.add(strat_name)
+                    wr = float(s.get('win_rate', 0))
+                    sharpe = float(s.get('sharpe_ratio', 0))
+                    pnl = float(s.get('total_pnl_pct', 0))
+                    dd = float(s.get('max_drawdown_pct', 0))
+                    trades = int(s.get('num_trades', 0))
+                    eep_score = float(s.get('eep_score', 0))
+                    strategy_scores.append({
+                        'strategy': f"{strat_name} ({s.get('symbol','')})",
+                        'signals': 0,
+                        'buy_count': 0,
+                        'sell_count': 0,
+                        'closed_count': trades,
+                        'win_rate_pct': round(wr * 100, 2),
+                        'avg_pnl_pct': round(float(s.get('avg_pnl_pct', pnl / max(trades, 1))), 4),
+                        'total_pnl_pct': round(pnl, 2),
+                        'profit_factor': round(s.get('eep_detail', {}).get('profit_factor', 0) if _has_eep else 0, 2),
+                        'sortino': round(sharpe, 2),
+                        'max_dd': round(dd, 2),
+                        'score': round(eep_score, 2),
+                        'eep_rank': s.get('eep_rank', 0),
+                        'gate_pass': s.get('gate_pass', True),
+                        'gate_fails': s.get('gate_fails', []),
+                        'grade': _grade_score(eep_score),
+                        'source': 'optimizer',
+                    })
+        except Exception as _e:
+            print(f'optimizer_runs query error: {_e}')
+
+        # 2. Library backtest from strategy_scores (only strategies not in optimizer)
         strategy_rows = con.execute(
             'SELECT DISTINCT strategy FROM strategy_scores ORDER BY strategy'
         ).fetchall()
-        
+
         for (strat_name,) in strategy_rows:
-            # Get latest scores for this strategy (aggregate across symbols and windows)
+            if strat_name in optimizer_names:
+                continue  # already covered by optimizer
             latest = con.execute(
                 '''SELECT 
                     COUNT(*) as eval_count,
@@ -151,22 +210,36 @@ def fetch_summary_data():
                     AVG(avg_pnl_pct) as avg_pnl,
                     AVG(sharpe_ratio) as avg_sharpe,
                     AVG(max_drawdown_pct) as avg_max_dd,
-                    MAX(score) as max_score,
-                    AVG(score) as avg_score
+                    MAX(score) as max_score
                 FROM strategy_scores 
                 WHERE strategy = ?
                 ''',
                 (strat_name,)
             ).fetchone()
-            
+
             if latest:
-                eval_count, avg_wr, avg_pnl, avg_sharpe, avg_max_dd, max_score, avg_score = latest
+                eval_count, avg_wr, avg_pnl, avg_sharpe, avg_max_dd, max_score = latest
                 win_pct = (avg_wr * 100) if avg_wr else 0
-                
-                # Score: blend of multiple metrics
-                final_score = max_score if max_score else 0
+                # Compute EEP for library strategies too
+                lib_s = {
+                    "win_rate": avg_wr or 0,
+                    "sharpe_ratio": avg_sharpe or 0,
+                    "total_pnl_pct": avg_pnl * eval_count if avg_pnl else 0,
+                    "avg_pnl_pct": avg_pnl or 0,
+                    "max_drawdown_pct": avg_max_dd or 0,
+                    "num_trades": eval_count or 0,
+                    "risk_params": {},
+                }
+                if _has_eep:
+                    lib_eep = _eep_score(lib_s)
+                    final_score = lib_eep["eep_score"]
+                    lib_gate_pass = lib_eep["gate_pass"]
+                    lib_gate_fails = lib_eep["gate_fails"]
+                else:
+                    final_score = max_score if max_score else 0
+                    lib_gate_pass = True
+                    lib_gate_fails = []
                 grade = _grade_score(final_score)
-                
                 strategy_scores.append({
                     'strategy': strat_name,
                     'signals': int(sum(1 for s in sigs if s.get('strategy') == strat_name)),
@@ -175,15 +248,31 @@ def fetch_summary_data():
                     'closed_count': int(eval_count),
                     'win_rate_pct': round(win_pct, 2),
                     'avg_pnl_pct': round(avg_pnl, 4) if avg_pnl else 0,
-                    'profit_factor': 0,  # Not tracked separately in strategy_scores, use max_score instead
+                    'profit_factor': 0,
                     'sortino': round(avg_sharpe, 2) if avg_sharpe else 0,
                     'max_dd': round(avg_max_dd, 2) if avg_max_dd else 0,
                     'score': round(final_score, 2),
+                    'eep_rank': None,  # filled below after ranking
+                    'gate_pass': lib_gate_pass,
+                    'gate_fails': lib_gate_fails,
                     'grade': grade,
+                    'source': 'library_backtest',
                 })
-        
-        # Rank strategy scores by max_score descending
-        strategy_scores.sort(key=lambda s: s.get('score', 0), reverse=True)
+
+        # Optimizer strategies always lead, then library sorted by EEP score
+        # Gate-passing strategies ranked before non-passing within each group
+        opt_entries = [s for s in strategy_scores if s.get('source') == 'optimizer']
+        lib_entries = [s for s in strategy_scores if s.get('source') != 'optimizer']
+        opt_entries.sort(key=lambda s: (0 if s.get('gate_pass', True) else 1, -s.get('score', 0)))
+        lib_entries.sort(key=lambda s: (0 if s.get('gate_pass', True) else 1, -s.get('score', 0)))
+        strategy_scores = opt_entries + lib_entries
+
+        # Assign EEP ranks to any entries without one (library backtest)
+        global_rank = 1
+        for entry in strategy_scores:
+            if entry.get('eep_rank') is None:
+                entry['eep_rank'] = global_rank
+            global_rank += 1
 
         # Top 10 paper trades by PnL (SQL-side sort, no Python re-sort needed)
         top_trades = [dict(r) for r in con.execute(
@@ -282,7 +371,68 @@ class H(BaseHTTPRequestHandler):
             limit = int(q.get('limit', ['300'])[0])
             result = json.dumps(timeseries(symbol, max(30, min(limit, 1000))), default=str).encode()
             return self.sendb(result)
-        
+
+        if p.path == '/api/strategies':
+            # Return top strategies with EEP scores from strategy_scores + backtest tables
+            try:
+                limit = int(q.get('limit', ['50'])[0])
+                source_filter = q.get('source', [None])[0]
+
+                # Pull latest entry per strategy+symbol from strategy_scores
+                query = """
+                    SELECT ss.strategy, ss.symbol, ss.window, ss.trades, ss.wins, ss.losses,
+                           ss.win_rate, ss.avg_pnl_pct, ss.total_pnl_pct, ss.sharpe_ratio,
+                           ss.max_drawdown_pct, ss.score,
+                           MAX(ss.ts_ms) as latest_ts, ss.ts_iso
+                    FROM strategy_scores ss
+                    WHERE ss.enabled = 1
+                    GROUP BY ss.strategy, ss.symbol
+                    ORDER BY ss.score DESC
+                    LIMIT ?
+                """
+                rows = [dict(r) for r in con.execute(query, (limit,)).fetchall()]
+
+                # Enrich with EEP metadata from strategy_backtest_results
+                enriched = []
+                for row in rows:
+                    br = con.execute(
+                        """SELECT metrics_json, config_json
+                           FROM strategy_backtest_results
+                           WHERE strategy=? AND symbol=?
+                           ORDER BY ts_ms DESC LIMIT 1""",
+                        (row["strategy"], row["symbol"] or "")
+                    ).fetchone()
+                    extra = {}
+                    if br:
+                        try:
+                            extra = json.loads(br["metrics_json"] or "{}")
+                        except Exception:
+                            pass
+                    row["eep_score"] = row.get("score", 0)
+                    row["source"] = extra.get("source", "library_backtest")
+                    if source_filter and row["source"] != source_filter:
+                        continue
+                    enriched.append(row)
+
+                result = json.dumps({
+                    "strategies": enriched,
+                    "count": len(enriched),
+                    "fetched_at_ms": int(time.time() * 1000),
+                }, default=str).encode()
+                return self.sendb(result)
+            except Exception as e:
+                return self.sendb(json.dumps({"error": str(e)}).encode(), code=500)
+
+        if p.path == '/api/execution_calibration':
+            # Serve the execution calibration config
+            calib_path = ROOT / 'data' / 'execution_calibration.json'
+            if calib_path.exists():
+                with open(calib_path) as f:
+                    result = f.read().encode()
+                return self.sendb(result)
+            else:
+                return self.sendb(json.dumps({"error": "not generated yet"}).encode(), code=404)
+
         if p.path == '/':
             # Minimal HTML that auto-refreshes and shows staleness
             html = '''<!doctype html>
@@ -324,7 +474,7 @@ select{background:#0f172a;color:#e7ecff;border:1px solid #334155;padding:6px;bor
 </div>
 <div class="section">
 <h2>Top Strategies (25)</h2>
-<table><thead><tr><th data-col="strategy">Strategy</th><th data-col="signals">Signals</th><th data-col="trades">Trades</th><th data-col="wr">Win%</th><th data-col="pnl">PnL%</th><th data-col="pf">Profit Factor</th><th data-col="sortino">Sortino</th><th data-col="maxdd">Max DD%</th><th data-col="grade" title="Grade: A (85+), B (70-84), C (55-69), D (40-54), F (<40). Combines win rate, profit factor, Sortino ratio, and max drawdown into a single score.">Grade</th></tr></thead>
+<table><thead><tr><th data-col="eep_rank" title="EEP Rank: Entry+Exit Package score (0-100). Gate-passing strategies ranked first.">EEP#</th><th data-col="strategy">Strategy</th><th data-col="signals">Signals</th><th data-col="trades">Trades</th><th data-col="wr">Win%</th><th data-col="pnl">PnL%</th><th data-col="pf">Profit Factor</th><th data-col="eep_score" title="EEP Score 0-100: 70% entry quality (PF 30%, Sharpe 25%, DD 20%, Sortino 15%, Expectancy 10%) + 30% exit quality (MPC 25%, RR 20%, SHF 15%, BEUR 10%)">EEP Score</th><th data-col="sortino">Sortino</th><th data-col="maxdd">Max DD%</th><th data-col="gate" title="Hard gates: PF≥1.3, Sharpe≥0.8, MDD≤35%, Trades≥30, positive expectancy">Gates</th></tr></thead>
 <tbody id="strats"></tbody></table>
 </div>
 <div class="section">
@@ -377,17 +527,23 @@ function renderStrategies(){
     else if(col==='wr')av=a.win_rate_pct,bv=b.win_rate_pct;
     else if(col==='pnl')av=a.total_pnl_pct,bv=b.total_pnl_pct;
     else if(col==='pf')av=a.profit_factor,bv=b.profit_factor;
+    else if(col==='eep_score')av=a.score||0,bv=b.score||0;
+    else if(col==='eep_rank')av=a.eep_rank||999,bv=b.eep_rank||999;
     else if(col==='sortino')av=a.sortino,bv=b.sortino;
     else if(col==='maxdd')av=a.max_dd,bv=b.max_dd;
-    else if(col==='grade'){const gv={A:4,B:3,C:2,D:1,F:0};av=gv[a.grade]||0;bv=gv[b.grade]||0;}
+    else if(col==='gate')av=a.gate_pass?1:0,bv=b.gate_pass?1:0;
     if(typeof av==='string')return asc?av.localeCompare(bv):bv.localeCompare(av);
     return asc?av-bv:bv-av;
   });
   let h='';
-  for(let s of sorted){
+  for(let i=0;i<sorted.length;i++){
+    const s=sorted[i];
     const c=s.total_pnl_pct>=0?'positive':'negative';
     const pf=s.profit_factor>1.5?'positive':(s.profit_factor>1?'#999':'negative');
-    h+='<tr><td>'+s.strategy+'</td><td>'+s.signals+'</td><td>'+s.closed_count+'</td><td>'+s.win_rate_pct+'%</td><td class="'+c+'">'+s.total_pnl_pct.toFixed(1)+'%</td><td style="color:'+pf+'">'+s.profit_factor+'</td><td>'+s.sortino.toFixed(2)+'</td><td>'+s.max_dd.toFixed(2)+'%</td><td>'+s.grade+'</td></tr>';
+    const eepColor=s.score>=70?'#10b981':(s.score>=50?'#f59e0b':'#ef4444');
+    const gateIcon=s.gate_pass===false?'<span title="'+(s.gate_fails||[]).join(', ')+'">⛔</span>':'✅';
+    const rank=s.eep_rank||('#'+(i+1));
+    h+='<tr><td style="color:#60a5fa;font-weight:700">#'+rank+'</td><td>'+s.strategy+'</td><td>'+s.signals+'</td><td>'+s.closed_count+'</td><td>'+s.win_rate_pct+'%</td><td class="'+c+'">'+s.total_pnl_pct.toFixed(1)+'%</td><td style="color:'+pf+'">'+s.profit_factor+'</td><td style="color:'+eepColor+';font-weight:600">'+(s.score||0).toFixed(1)+'</td><td>'+s.sortino.toFixed(2)+'</td><td>'+s.max_dd.toFixed(2)+'%</td><td>'+gateIcon+'</td></tr>';
   }
   document.getElementById('strats').innerHTML=h;
   document.querySelectorAll('table thead th[data-col]').forEach(th=>{

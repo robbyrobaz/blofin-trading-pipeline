@@ -59,36 +59,59 @@ def calculate_total_pnl_pct(trades: List[Dict[str, Any]]) -> float:
     return float(np.sum(pnls))
 
 
+MIN_TRADES_FOR_SHARPE = 30  # Guard: Sharpe is unreliable below this sample count
+
+
 def calculate_sharpe_ratio(returns: List[float], risk_free_rate: float = 0.0) -> float:
     """
     Calculate Sharpe ratio (risk-adjusted return).
-    
+
+    Requires at least MIN_TRADES_FOR_SHARPE samples to produce a meaningful result;
+    returns 0.0 (NaN-safe sentinel) for smaller samples to avoid noise-driven inflation.
+
     Args:
         returns: List of period returns (as decimals, e.g., 0.01 for 1%)
         risk_free_rate: Risk-free rate (default 0)
-    
+
     Returns:
-        Sharpe ratio
+        Sharpe ratio, or 0.0 when sample count is below the minimum threshold
     """
-    if not returns or len(returns) < 2:
-        return 0.0
-    
+    if not returns or len(returns) < MIN_TRADES_FOR_SHARPE:
+        return 0.0  # Insufficient samples — do NOT produce a noisy Sharpe value
+
     returns_array = np.array(returns)
-    
+
     # Calculate excess returns
     excess_returns = returns_array - risk_free_rate
-    
+
     # Calculate Sharpe ratio
     mean_excess = np.mean(excess_returns)
     std_excess = np.std(excess_returns, ddof=1)
-    
+
     if std_excess == 0:
         return 0.0
-    
+
     # Annualize (assuming daily returns)
     sharpe = (mean_excess / std_excess) * np.sqrt(252)
-    
+
     return float(sharpe)
+
+
+def is_anomalous_metrics(win_rate: float, sharpe_ratio: float) -> bool:
+    """
+    Detect statistically impossible metric combinations.
+
+    A <5% win rate paired with Sharpe > 3 is mathematically impossible with real data
+    (would require astronomically large outlier wins to offset near-total losses).
+
+    Args:
+        win_rate: Win rate as fraction 0–1
+        sharpe_ratio: Computed Sharpe ratio
+
+    Returns:
+        True if the combination is anomalous and should be flagged / discarded
+    """
+    return win_rate < 0.05 and sharpe_ratio > 3.0
 
 
 def calculate_max_drawdown(equity_curve: List[float]) -> float:

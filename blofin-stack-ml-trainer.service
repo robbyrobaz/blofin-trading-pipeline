@@ -1,0 +1,23 @@
+[Unit]
+Description=Blofin Stack ML Trainer (retrain all models)
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/.openclaw/workspace/blofin-stack
+Environment="BLOFIN_WORKSPACE=%h/.openclaw/workspace/blofin-stack"
+Environment="PYTHONPATH=%h/.openclaw/workspace/blofin-stack"
+ExecStart=%h/.openclaw/workspace/blofin-stack/.venv/bin/python3 orchestration/run_ml_trainer.py
+StandardOutput=append:%h/.openclaw/workspace/blofin-stack/data/ml_trainer.log
+StandardError=append:%h/.openclaw/workspace/blofin-stack/data/ml_trainer.log
+
+# Resource limits (ML training is compute-intensive)
+TimeoutSec=2h
+MemoryMax=4G
+CPUQuota=300%
+
+# Restart policy
+Restart=no
+
+[Install]
+WantedBy=default.target

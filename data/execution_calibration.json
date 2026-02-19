@@ -1,0 +1,94 @@
+{
+  "generated_at": "2026-02-17T18:19:32.736896+00:00",
+  "data_source": "paper_trades (closed)",
+  "calibrator_version": "v2",
+  "trade_count": 35719,
+  "win_rate": 0.3975,
+  "loss_rate": 0.6025,
+  "profit_factor": 0.774,
+  "execution": {
+    "ema_slippage_per_side_pct": 0.06,
+    "avg_slippage_per_side_pct": 0.06,
+    "assumed_slippage_per_side_pct": 0.02,
+    "assumed_fee_per_side_pct": 0.04,
+    "total_friction_pct": 0.12,
+    "assumed_friction_pct": 0.12,
+    "fill_rate": 0.6909,
+    "position_size_multiplier": 1.0,
+    "recent_n_weighted": 50,
+    "recent_weight_mult": 3.0
+  },
+  "hold_times": {
+    "avg_min": 100.2,
+    "median_min": 93.14,
+    "assumed_avg_min": 60.0,
+    "pct_hitting_time_limit": 0.3091
+  },
+  "exit_distribution": {
+    "TP": 7637,
+    "SL": 17040,
+    "TIME": 11042,
+    "OTHER": 0,
+    "TP_pct": 0.214,
+    "SL_pct": 0.477,
+    "TIME_pct": 0.309
+  },
+  "exit_quality": {
+    "stop_hit_frequency": 0.4771,
+    "avg_tp_pnl_pct": 1.6045,
+    "avg_sl_pnl_pct": -1.0891,
+    "rr_ratio": 1.473
+  },
+  "time_of_day": {
+    "00-06": {
+      "count": 10101,
+      "ema_slip": 0.0601,
+      "raw_avg": 0.0549,
+      "pos_mult": 0.999
+    },
+    "06-12": {
+      "count": 4587,
+      "ema_slip": 0.0594,
+      "raw_avg": 0.0602,
+      "pos_mult": 1.01
+    },
+    "12-18": {
+      "count": 11568,
+      "ema_slip": 0.06,
+      "raw_avg": 0.0503,
+      "pos_mult": 1.0
+    },
+    "18-24": {
+      "count": 9463,
+      "ema_slip": 0.0602,
+      "raw_avg": 0.0503,
+      "pos_mult": 0.996
+    }
+  },
+  "regime_slippage": {
+    "trending": {
+      "count": 31164,
+      "ema_slip": 0.0598,
+      "raw_avg": 0.0524,
+      "pos_mult": 1.004
+    },
+    "ranging": {
+      "count": 4411,
+      "ema_slip": 0.06,
+      "raw_avg": 0.0566,
+      "pos_mult": 1.0
+    },
+    "volatile": {
+      "count": 144,
+      "ema_slip": 0.0613,
+      "raw_avg": 0.0553,
+      "pos_mult": 0.979
+    }
+  },
+  "recommendations": [
+    "\u26a0  EMA slippage (0.060%/side) is >2\u00d7 assumed (0.02%). Widen SL or reduce entry aggression.",
+    "\u26a0  Stop hit frequency 47.7% is high \u2014 stops may be too tight.",
+    "\ud83d\udd34 Profit factor 0.77 < 1.0 \u2014 strategy losing overall."
+  ],
+  "symbol_breakdown": {}
+}

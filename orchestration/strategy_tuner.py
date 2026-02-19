@@ -393,29 +393,92 @@ CRITICAL: Return ONLY valid JSON. No markdown, no code fences, no explanation te
             # Apply changes
             if 'parameter_changes' in suggestions and suggestions['parameter_changes']:
                 tuned_code = self._apply_parameter_changes(code, suggestions['parameter_changes'])
-                
-                # Save tuned version
-                version = 2  # TODO: Increment based on existing versions
+
+                # Determine version from existing tuning attempts
+                try:
+                    attempt_row = con.execute(
+                        'SELECT MAX(tuning_attempt) FROM strategy_backtest_results WHERE strategy=?',
+                        (strategy_name,)
+                    ).fetchone()
+                    version = (attempt_row[0] or 0) + 1
+                except Exception:
+                    version = 2
+
                 filepath = self._save_tuned_strategy(strategy_name, tuned_code, version)
-                
+
+                # Increment tuning_attempt counter in strategy_backtest_results
+                try:
+                    con.execute(
+                        'UPDATE strategy_backtest_results SET tuning_attempt = tuning_attempt + 1 WHERE strategy=?',
+                        (strategy_name,)
+                    )
+                    con.commit()
+                except Exception as te:
+                    print(f"  ⚠ Could not increment tuning_attempt: {te}")
+
+                # PRIORITY 5: Auto-archive if tuning failures exceed threshold
+                MAX_TUNING_FAILURES = 3
+                try:
+                    current_attempt = con.execute(
+                        'SELECT MAX(tuning_attempt) FROM strategy_backtest_results WHERE strategy=?',
+                        (strategy_name,)
+                    ).fetchone()[0] or 0
+                    if current_attempt >= MAX_TUNING_FAILURES:
+                        reason = (
+                            f'Auto-archived after {current_attempt} failed tuning attempts '
+                            f'(threshold: {MAX_TUNING_FAILURES})'
+                        )
+                        con.execute(
+                            "UPDATE strategy_backtest_results SET status='archived' WHERE strategy=?",
+                            (strategy_name,)
+                        )
+                        con.execute(
+                            'UPDATE strategy_scores SET enabled=0 WHERE strategy=?',
+                            (strategy_name,)
+                        )
+                        con.commit()
+                        print(f"  ⛔ AUTO-ARCHIVED {strategy_name}: {reason}")
+                except Exception as ae:
+                    print(f"  ⚠ Auto-archive check failed: {ae}")
+
                 # Log tuning
                 self._log_tuning(con, strategy_name, suggestions, str(filepath))
-                
-                print(f"Strategy tuned and saved: {filepath}")
-                
+
+                print(f"Strategy tuned and saved: {filepath} (attempt #{version})")
+
                 return {
                     'strategy_name': strategy_name,
                     'filepath': str(filepath),
                     'suggestions': suggestions,
                     'old_performance': performance,
-                    'failure_analysis': failure_analysis
+                    'failure_analysis': failure_analysis,
+                    'tuning_attempt': version,
                 }
             else:
+                # Failed tuning attempt — still increment counter
+                try:
+                    con.execute(
+                        'UPDATE strategy_backtest_results SET tuning_attempt = tuning_attempt + 1 WHERE strategy=?',
+                        (strategy_name,)
+                    )
+                    con.commit()
+                    print(f"  ⚠ No parameter changes suggested for {strategy_name} — incremented tuning_attempt")
+                except Exception:
+                    pass
                 print("No parameter changes suggested")
                 return None
-            
+
         except Exception as e:
             print(f"Tuning failed for {strategy_name}: {e}")
+            # Increment failure counter even on exception
+            try:
+                con.execute(
+                    'UPDATE strategy_backtest_results SET tuning_attempt = tuning_attempt + 1 WHERE strategy=?',
+                    (strategy_name,)
+                )
+                con.commit()
+            except Exception:
+                pass
             return None
         finally:
             con.close()

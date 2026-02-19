@@ -1,0 +1,14 @@
+[Unit]
+Description=Blofin Stack Phase 2 ML Retrain Trigger Timer
+Requires=blofin-stack-phase2-retrain.service
+
+[Timer]
+# Run daily at 06:00 MST (13:00 UTC)
+# MST is UTC-7, so 06:00 MST = 13:00 UTC
+OnCalendar=*-*-* 13:00:00
+Persistent=true
+# If system was off, run on next boot
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

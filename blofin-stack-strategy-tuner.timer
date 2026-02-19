@@ -1,0 +1,13 @@
+[Unit]
+Description=Blofin Stack Strategy Tuner Timer (every 6h)
+Requires=blofin-stack-strategy-tuner.service
+
+[Timer]
+# Run every 6 hours at :00 UTC
+OnCalendar=*-*-* 00,06,12,18:00:00
+Persistent=true
+# Stagger to avoid simultaneous startup with other timers
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

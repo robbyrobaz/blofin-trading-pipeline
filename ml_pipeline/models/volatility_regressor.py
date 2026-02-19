@@ -55,15 +55,23 @@ class VolatilityRegressor(BaseModel):
         # Select features
         X_selected = X[self.feature_names] if isinstance(X, pd.DataFrame) else X
         
-        # Normalize features
+        # DATA LEAKAGE GUARD: Temporal split (no shuffle) to prevent future data in training set.
+        MIN_SAMPLES = 50
+        if len(X_selected) < MIN_SAMPLES:
+            raise ValueError(
+                f"Insufficient training data for {self.model_name}: "
+                f"{len(X_selected)} samples (minimum {MIN_SAMPLES} required)"
+            )
+        split_idx = int(len(X_selected) * 0.8)
         self.scaler = StandardScaler()
-        X_scaled = self.scaler.fit_transform(X_selected)
-        
-        # Train/validation split
-        X_train, X_val, y_train, y_val = train_test_split(
-            X_scaled, y, test_size=0.2, random_state=42
-        )
-        
+        X_train_raw = X_selected.iloc[:split_idx] if hasattr(X_selected, 'iloc') else X_selected[:split_idx]
+        y_train = y.iloc[:split_idx] if hasattr(y, 'iloc') else y[:split_idx]
+        y_val = y.iloc[split_idx:] if hasattr(y, 'iloc') else y[split_idx:]
+        self.scaler.fit(X_train_raw)
+        X_scaled = self.scaler.transform(X_selected.iloc[:] if hasattr(X_selected, 'iloc') else X_selected)
+        X_train = X_scaled[:split_idx]
+        X_val = X_scaled[split_idx:]
+
         # Train Gradient Boosting
         self.model = GradientBoostingRegressor(**self.config["hyperparams"])
         self.model.fit(X_train, y_train)

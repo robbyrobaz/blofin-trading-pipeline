@@ -1,0 +1,23 @@
+[Unit]
+Description=Blofin Stack Phase 2 ML Retrain Trigger Check
+After=network.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/.openclaw/workspace/blofin-stack
+Environment="BLOFIN_WORKSPACE=%h/.openclaw/workspace/blofin-stack"
+Environment="PYTHONPATH=%h/.openclaw/workspace/blofin-stack"
+ExecStart=%h/.openclaw/workspace/blofin-stack/cron_phase2_check.sh
+StandardOutput=append:%h/.openclaw/workspace/blofin-stack/logs/phase2_retrain.log
+StandardError=append:%h/.openclaw/workspace/blofin-stack/logs/phase2_retrain.log
+
+# Resource limits (ML training can be compute-intensive)
+TimeoutSec=2h
+MemoryMax=4G
+CPUQuota=300%
+
+# Restart policy
+Restart=no
+
+[Install]
+WantedBy=default.target

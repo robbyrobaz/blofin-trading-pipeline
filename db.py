@@ -462,12 +462,15 @@ def query_top_strategies(con: sqlite3.Connection, limit: int = 10, status: str =
 
 
 def query_top_models(con: sqlite3.Connection, limit: int = 10, archived: int = 0) -> List[Dict[str, Any]]:
-    """Query top-performing ML models by test accuracy."""
+    """Query top-performing ML models by test accuracy — one row per model_name (deduplicated)."""
     cur = con.execute(
-        '''SELECT model_name, model_type, test_accuracy, f1_score, precision_score, recall_score
+        '''SELECT model_name, model_type,
+                  MAX(ts_ms) as latest_ts,
+                  test_accuracy, f1_score, precision_score, recall_score
         FROM ml_model_results
         WHERE archived = ?
-        ORDER BY test_accuracy DESC, f1_score DESC, ts_ms DESC
+        GROUP BY model_name
+        ORDER BY f1_score DESC, test_accuracy DESC, latest_ts DESC
         LIMIT ?''',
         (archived, limit)
     )

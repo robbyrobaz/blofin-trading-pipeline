@@ -16,6 +16,9 @@ class BBSqueezeStrategy(BaseStrategy):
         self.lookback_seconds = int(os.getenv("BB_LOOKBACK_SECONDS", "1200"))
         self.std_mult = float(os.getenv("BB_STD_MULT", "2.0"))
         self.squeeze_threshold = float(os.getenv("BB_SQUEEZE_THRESHOLD", "0.3"))
+        # Evening tuning 2026-02-16: require minimum band width to avoid noise on
+        # near-zero-volatility periods. Estimated +5-10% WR lift.
+        self.min_band_width_pct = float(os.getenv("BB_MIN_BAND_WIDTH_PCT", "0.5"))
     
     def detect(
         self,
@@ -45,8 +48,13 @@ class BBSqueezeStrategy(BaseStrategy):
         
         # Check if bands are tight (squeeze)
         is_squeeze = band_width_pct <= (self.squeeze_threshold * 100)
-        
+
         if not is_squeeze:
+            return None
+
+        # Require minimum band width to avoid noise in near-zero-volatility periods
+        # (Evening tuning 2026-02-16: min_band_width_pct=0.5)
+        if band_width_pct < self.min_band_width_pct:
             return None
         
         # Check for breakout direction
@@ -84,6 +92,7 @@ class BBSqueezeStrategy(BaseStrategy):
             "lookback_seconds": self.lookback_seconds,
             "std_mult": self.std_mult,
             "squeeze_threshold": self.squeeze_threshold,
+            "min_band_width_pct": self.min_band_width_pct,
         }
     
     def update_config(self, params: Dict[str, Any]) -> None:
@@ -93,3 +102,5 @@ class BBSqueezeStrategy(BaseStrategy):
             self.std_mult = float(params["std_mult"])
         if "squeeze_threshold" in params:
             self.squeeze_threshold = float(params["squeeze_threshold"])
+        if "min_band_width_pct" in params:
+            self.min_band_width_pct = float(params["min_band_width_pct"])

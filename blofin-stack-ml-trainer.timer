@@ -1,0 +1,13 @@
+[Unit]
+Description=Blofin Stack ML Trainer Timer (every 4h)
+Requires=blofin-stack-ml-trainer.service
+
+[Timer]
+# Run every 4 hours at :00 UTC
+OnCalendar=*-*-* 00,04,08,12,16,20:00:00
+Persistent=true
+# Stagger to avoid simultaneous startup with other timers
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

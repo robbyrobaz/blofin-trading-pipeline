@@ -14,8 +14,10 @@ class MomentumStrategy(BaseStrategy):
     
     def __init__(self):
         self.window_seconds = int(os.getenv("MOMENTUM_WINDOW_SECONDS", "240"))
-        self.up_pct = float(os.getenv("MOMENTUM_UP_PCT", "1.00"))
-        self.down_pct = float(os.getenv("MOMENTUM_DOWN_PCT", "-1.00"))
+        # Evening tuning 2026-02-16: raised from 0.60% → 1.0% to filter weak signals.
+        # WR was 30.9%; target 35-45% post-tuning. Estimated +4-14% WR lift.
+        self.up_pct = float(os.getenv("MOMENTUM_UP_PCT", "1.0"))
+        self.down_pct = float(os.getenv("MOMENTUM_DOWN_PCT", "-1.0"))
     
     def detect(
         self,

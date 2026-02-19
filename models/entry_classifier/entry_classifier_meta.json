@@ -1,0 +1,93 @@
+{
+  "trained_at": "2026-02-18T23:05:45.234277Z",
+  "feature_cols": [
+    "side",
+    "confidence",
+    "cs_score",
+    "hour_sin",
+    "hour_cos",
+    "dow_sin",
+    "dow_cos",
+    "strat_bb_squeeze",
+    "strat_breakout",
+    "strat_candle_patterns",
+    "strat_ema_crossover",
+    "strat_momentum",
+    "strat_reversal",
+    "strat_rsi_divergence",
+    "strat_support_resistance",
+    "strat_volume_mean_reversion",
+    "strat_vwap_reversion",
+    "detail_band_width_pct",
+    "detail_mean",
+    "detail_prev_high",
+    "detail_prev_low",
+    "detail_threshold",
+    "detail_body_pct",
+    "detail_upper_wick",
+    "detail_lower_wick",
+    "detail_change_pct",
+    "detail_bounce_pct",
+    "detail_reject_pct",
+    "detail_rsi",
+    "detail_distance_pct",
+    "detail_touches",
+    "detail_deviation_pct",
+    "detail_volume_ratio",
+    "detail_volatility_pct"
+  ],
+  "metrics": {
+    "roc_auc": 0.5766036374604624,
+    "pr_auc": 0.4928542204111848,
+    "f1": 0.542122285538272,
+    "precision": 0.47657730842133766,
+    "recall": 0.6285714285714286,
+    "n_train": 9940,
+    "n_test": 7181,
+    "train_win_rate": 0.38008048289738433,
+    "test_win_rate": 0.3899178387411224
+  },
+  "top_features": [
+    [
+      "side",
+      0.16629980504512787
+    ],
+    [
+      "hour_sin",
+      0.11128316074609756
+    ],
+    [
+      "hour_cos",
+      0.09602233022451401
+    ],
+    [
+      "dow_sin",
+      0.0933515876531601
+    ],
+    [
+      "strat_reversal",
+      0.06081691011786461
+    ],
+    [
+      "strat_momentum",
+      0.04243866726756096
+    ],
+    [
+      "strat_vwap_reversion",
+      0.03574557229876518
+    ],
+    [
+      "strat_breakout",
+      0.03145246580243111
+    ],
+    [
+      "dow_cos",
+      0.028798026964068413
+    ],
+    [
+      "detail_reject_pct",
+      0.02862349897623062
+    ]
+  ],
+  "scale_pos_weight": 1.6310217046056115
+}

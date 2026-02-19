@@ -178,7 +178,15 @@ class DailyReporter:
         if win_rate > 55:
             health_score += 25
         
-        health_status = 'excellent' if health_score >= 75 else 'good' if health_score >= 50 else 'fair' if health_score >= 25 else 'poor'
+        # BUG FIX: Correct thresholds (previously inverted — score 20 was incorrectly labelled 'GOOD').
+        # 80-100 = EXCELLENT, 60-80 = GOOD, 40-60 = FAIR, 20-40 = POOR, 0-20 = CRITICAL
+        health_status = (
+            'excellent' if health_score >= 80 else
+            'good'      if health_score >= 60 else
+            'fair'      if health_score >= 40 else
+            'poor'      if health_score >= 20 else
+            'critical'
+        )
         
         return {
             'active_strategies': active_strategies,

@@ -1,0 +1,13 @@
+[Unit]
+Description=Blofin Stack Ranker Timer (daily)
+Requires=blofin-stack-ranker.service
+
+[Timer]
+# Run once daily at 00:00 UTC
+OnCalendar=*-*-* 00:00:00
+Persistent=true
+# Small delay so backtester/trainer can finish if they also ran at midnight
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

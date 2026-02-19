@@ -1,0 +1,76 @@
+{
+  "trained_at": "2026-02-18T23:05:45.793632Z",
+  "feature_cols": [
+    "side",
+    "hold_min",
+    "confidence",
+    "hour_sin",
+    "hour_cos",
+    "dow_sin",
+    "dow_cos",
+    "strat_bb_squeeze",
+    "strat_breakout",
+    "strat_candle_patterns",
+    "strat_ema_crossover",
+    "strat_momentum",
+    "strat_reversal",
+    "strat_rsi_divergence",
+    "strat_support_resistance",
+    "strat_volume_mean_reversion",
+    "strat_vwap_reversion"
+  ],
+  "metrics": {
+    "roc_auc": 0.7842388910342253,
+    "pr_auc": 0.3695535920615302,
+    "f1": 0.5408074353761255,
+    "precision": 0.4846434148880791,
+    "recall": 0.6116951379763469,
+    "n_train": 28722,
+    "n_test": 7181,
+    "close_now_rate_train": 0.21401712972634218,
+    "close_now_rate_test": 0.2119481966299958
+  },
+  "top_features": [
+    [
+      "hold_min",
+      0.2833060324192047
+    ],
+    [
+      "hour_cos",
+      0.15913990139961243
+    ],
+    [
+      "hour_sin",
+      0.1528160274028778
+    ],
+    [
+      "side",
+      0.1386246383190155
+    ],
+    [
+      "dow_cos",
+      0.10912802815437317
+    ],
+    [
+      "dow_sin",
+      0.06144466623663902
+    ],
+    [
+      "strat_vwap_reversion",
+      0.029783090576529503
+    ],
+    [
+      "strat_rsi_divergence",
+      0.01722050830721855
+    ],
+    [
+      "confidence",
+      0.012978978455066681
+    ],
+    [
+      "strat_bb_squeeze",
+      0.012136922217905521
+    ]
+  ],
+  "scale_pos_weight": 3.6725231820400195
+}

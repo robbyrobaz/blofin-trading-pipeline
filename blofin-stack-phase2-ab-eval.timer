@@ -1,0 +1,14 @@
+[Unit]
+Description=Blofin Stack Phase 2 A/B Evaluation Timer
+Requires=blofin-stack-phase2-ab-eval.service
+
+[Timer]
+# Run daily at 18:00 MST (01:00 UTC next day)
+# MST is UTC-7, so 18:00 MST = 01:00 UTC (next day)
+OnCalendar=*-*-* 01:00:00
+Persistent=true
+# If system was off, run on next boot
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

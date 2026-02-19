@@ -1,0 +1,132 @@
+{
+  "generated_by": "strategy_adjuster",
+  "generated_at": "2026-02-17T04:24:06.231903+00:00",
+  "purpose": "Knowledge base for Strategy Librarian integration. Adjuster-observed live performance.",
+  "market_regime": "ranging_low_volatility",
+  "regime_duration_days": 4,
+  "live_strategies": {
+    "bb_squeeze": {
+      "paper_trade_wr_24h": 0.453,
+      "paper_trade_avg_pnl_24h": -0.0003,
+      "paper_trade_confirmed_24h": 2061,
+      "strategy_score_wr_24h": 0.363,
+      "sharpe_48h_avg": -0.25,
+      "adjuster_status": "ACTIVE_FLAG_SHARPE",
+      "key_finding": "band_width_pct >= 0.5% correlates with wins; < 0.5% with losses",
+      "parameter_rec": "Add min_band_width_pct=0.50 filter",
+      "last_evaluated": "2026-02-17T04:24:06.231903+00:00"
+    },
+    "momentum": {
+      "paper_trade_wr_24h": 0.437,
+      "paper_trade_avg_pnl_24h": 0.0005,
+      "paper_trade_confirmed_24h": 412,
+      "strategy_score_wr_24h": 0.309,
+      "sharpe_48h_avg": -0.292,
+      "adjuster_status": "DISABLED_BORDERLINE",
+      "key_finding": "Only strategy with positive avg_pnl. Signals fire at 0.65-0.78% (below 0.8% threshold).",
+      "parameter_rec": "Increase up_pct/down_pct to 1.0%",
+      "last_evaluated": "2026-02-17T04:24:06.231903+00:00"
+    },
+    "reversal": {
+      "paper_trade_wr_24h": 0.428,
+      "paper_trade_avg_pnl_24h": -0.0007,
+      "paper_trade_confirmed_24h": 3992,
+      "strategy_score_wr_24h": 0.348,
+      "sharpe_48h_avg": -0.28,
+      "adjuster_status": "DISABLED_BORDERLINE",
+      "key_finding": "reject_pct not predictive. Volume confirmation would help selectivity.",
+      "parameter_rec": "Add volume confirmation filter (vol > avg*1.2)",
+      "last_evaluated": "2026-02-17T04:24:06.231903+00:00"
+    },
+    "candle_patterns": {
+      "paper_trade_wr_24h": 0.419,
+      "paper_trade_avg_pnl_24h": -0.0011,
+      "paper_trade_confirmed_24h": 5723,
+      "strategy_score_wr_24h": 0.38,
+      "sharpe_48h_avg": -0.228,
+      "adjuster_status": "ACTIVE_FLAG_SHARPE",
+      "key_finding": "Highest signal volume. Acceptable WR but consistently negative pnl.",
+      "parameter_rec": "Reduce signal frequency or increase confidence thresholds",
+      "last_evaluated": "2026-02-17T04:24:06.231903+00:00"
+    },
+    "rsi_divergence": {
+      "paper_trade_wr_24h": 0.364,
+      "paper_trade_avg_pnl_24h": -0.0022,
+      "paper_trade_confirmed_24h": 533,
+      "strategy_score_wr_24h": 0.454,
+      "sharpe_48h_avg": -0.225,
+      "adjuster_status": "ACTIVE_FLAG_SHARPE",
+      "key_finding": "SELL signals failing (35.3% WR vs BUY 44.5%). Winning RSI avg=46.3 (non-extreme).",
+      "parameter_rec": "Disable SELL signals in ranging regime OR increase overbought to 85",
+      "last_evaluated": "2026-02-17T04:24:06.231903+00:00"
+    },
+    "support_resistance": {
+      "paper_trade_wr_24h": 0.397,
+      "paper_trade_avg_pnl_24h": -0.0016,
+      "paper_trade_confirmed_24h": 5282,
+      "strategy_score_wr_24h": 0.368,
+      "sharpe_48h_avg": -0.233,
+      "adjuster_status": "ACTIVE_FLAG_SHARPE",
+      "key_finding": "High signal volume, acceptable WR, negative pnl. Possible threshold issues.",
+      "parameter_rec": "Review level detection sensitivity",
+      "last_evaluated": "2026-02-17T04:24:06.231903+00:00"
+    },
+    "vwap_reversion": {
+      "paper_trade_wr_24h": 0.384,
+      "paper_trade_avg_pnl_24h": -0.0018,
+      "paper_trade_confirmed_24h": 1409,
+      "strategy_score_wr_24h": 0.424,
+      "sharpe_48h_avg": -0.078,
+      "adjuster_status": "ACTIVE_MONITOR",
+      "key_finding": "CRITICAL: Signals firing at 0.40-0.69% deviation despite 1.20% configured threshold. ENV VAR mismatch.",
+      "parameter_rec": "Verify VWAP_DEVIATION_PCT env var. Target: >= 0.70%",
+      "last_evaluated": "2026-02-17T04:24:06.231903+00:00"
+    },
+    "breakout": {
+      "paper_trade_wr_24h": 0.387,
+      "paper_trade_avg_pnl_24h": -0.0014,
+      "paper_trade_confirmed_24h": 287,
+      "strategy_score_wr_24h": 0.251,
+      "sharpe_48h_avg": -0.522,
+      "adjuster_status": "DISABLED",
+      "key_finding": "Worst strategy_scores WR (25.1%). breakout_v2.py is replacement candidate.",
+      "parameter_rec": "See breakout_v2.py in watch list",
+      "last_evaluated": "2026-02-17T04:24:06.231903+00:00"
+    }
+  },
+  "library_candidates_tested": {
+    "strategy_025": {
+      "name": "vol_volume_reversion",
+      "backtest_result": "FAILED_0_SIGNALS",
+      "reason": "Conditions too restrictive (RSI<35 + vol spikes simultaneously)",
+      "fix_needed": "Relax RSI threshold to 45, reduce vol_surge to 1.3x, reduce min_bars to 1",
+      "ready_for_live": false
+    },
+    "strategy_023": {
+      "name": "volatility_expansion_volume_breakout",
+      "backtest_result": "FAILED_0_SIGNALS",
+      "reason": "1.5% breakout threshold too large for 5m ranging market",
+      "fix_needed": "Reduce threshold to 0.3%, lower volume requirements",
+      "ready_for_live": false
+    }
+  },
+  "decisions_today": {
+    "disabled": [
+      "breakout",
+      "momentum",
+      "reversal"
+    ],
+    "flagged_sharpe": [
+      "rsi_divergence",
+      "bb_squeeze",
+      "candle_patterns",
+      "support_resistance"
+    ],
+    "new_watch_list_entries": [
+      "breakout_v2",
+      "strategy_025",
+      "strategy_023"
+    ],
+    "promoted_to_live": []
+  }
+}

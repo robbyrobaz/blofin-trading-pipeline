@@ -1,0 +1,242 @@
+================================================================================
+STRATEGY ADJUSTER LOG
+Run: 2026-02-16 21:10 MST (2026-02-17 04:10 UTC)
+Execution type: Evening run (20:00 MST slot)
+================================================================================
+
+## DATA SOURCES CONSULTED
+- strategy_scores DB (8656 entries in 24h window, updated every 5min)
+- signals table: 23,516 signals in last 24h
+- paper_trades: confirmed trade outcomes
+- ranking_history: 244 entries
+- knowledge_entries: recent AI tuning notes
+- Librarian strategy_scores.json: NOT FOUND (Librarian has not run yet)
+- Data range: 2026-02-13 to 2026-02-17 (25.1M ticks available)
+
+## MARKET REGIME
+- Current: ranging_low_volatility (consistent for past 4 days per AI reviews)
+- Market note: All recent AI-generated strategies designed for this regime
+- Key implication: Breakout/momentum strategies struggle in ranging markets
+
+================================================================================
+## SECTION 1: PRUNE LOSERS
+================================================================================
+
+### ANALYSIS: 24h Window Win Rate (strategy_scores DB)
+Strategy           | 24h avg WR | % pts <35% | 48h Sharpe | % pts neg
+breakout           |    25.1%   |    81%     |   -0.522   |   100%    ← DISABLE
+momentum           |    30.9%   |    47%     |   -0.292   |    75%    ← DISABLE  
+reversal           |    34.8%   |    44%     |   -0.280   |    97%    ← DISABLE
+rsi_divergence     |    45.4%   |     0%     |   -0.225   |    95%    ← FLAG SHARPE
+bb_squeeze         |    36.3%   |    38%     |   -0.250   |    95%    ← FLAG SHARPE
+candle_patterns    |    38.0%   |    20%     |   -0.228   |   100%    ← FLAG SHARPE
+support_resistance |    36.8%   |    21%     |   -0.233   |   100%    ← FLAG SHARPE
+vwap_reversion     |    42.4%   |     2%     |   -0.078   |    79%    ← MONITOR
+
+### ANALYSIS: Live Paper Trade Win Rate (last 24h, all confirmed trades)
+Strategy           | Confirmed | WR    | Avg PnL  | Note
+candle_patterns    |   5723    | 41.9% | -0.11%   | High volume
+support_resistance |   5282    | 39.7% | -0.16%   | High volume
+reversal           |   3992    | 42.8% | -0.07%   | Positive pnl outliers
+bb_squeeze         |   2061    | 45.3% | -0.03%   | Best WR in paper trades
+vwap_reversion     |   1409    | 38.4% | -0.18%   | Below-threshold deviation firing
+rsi_divergence     |    533    | 36.4% | -0.22%   | SELL signals problematic (35.3% WR)
+momentum           |    412    | 43.7% | +0.05%   | ONLY strategy with positive avg pnl
+breakout           |    287    | 38.7% | -0.14%   | Better in paper than score suggests
+
+NOTE: strategy_scores 24h and paper trade WR show DIFFERENT numbers because:
+- strategy_scores computes per-symbol averages across all tick-level signals
+- paper_trades reflects actual confirmed trade outcomes (ensemble gate: 4+ strategies agree)
+- Paper trade WR is a better real-world performance metric
+
+### DECISION 1: DISABLE breakout
+RULE: WR < 35% for > 24h (strategy_scores 24h avg = 25.1%, 81% of data points below 35%)
+CORROBORATION: 100% of 48h data points show negative Sharpe (-0.522 avg)
+LIBRARIAN CONTEXT: Recent tuning created breakout_v2.py with improved parameters
+  (buffer_pct: 0.18%→0.75%, lookback_seconds: 900→3600, + volume/time filters)
+  breakout_v2.py is the replacement candidate - see watch list
+ACTION: DISABLE breakout in live signal generation
+LOG: 2026-02-17T04:10 UTC | DISABLED | breakout | wr=25.1% (24h) | sharpe=-0.52 (48h)
+
+### DECISION 2: DISABLE momentum  
+RULE: WR < 35% for > 24h (strategy_scores 24h avg = 30.9%, 47% of data points below 35%)
+CONFLICTING SIGNAL: paper_trades show 43.7% WR with +0.05% avg pnl (the only positive)
+RESOLUTION: Disable at strategy_scores level (system rule), but flag as high-priority
+  for re-enable testing once breakout is suppressed. Paper trade performance suggests
+  momentum's SIGNALS are good when passed through ensemble gate.
+REGIME NOTE: 180s window / 0.8% threshold may be causing excessive signals in ranging market
+ACTION: DISABLE momentum (flag for re-evaluation in 24h)
+LOG: 2026-02-17T04:10 UTC | DISABLED | momentum | wr=30.9% (24h) | paper_wr=43.7% (CONFLICT) | sharpe=-0.29 (48h)
+
+### DECISION 3: DISABLE reversal
+RULE: WR < 35% for > 24h (strategy_scores 24h avg = 34.8%, 44% points below 35%)  
+CONFLICTING SIGNAL: paper_trades show 42.8% WR, avg_pnl=-0.07%
+RESOLUTION: Disable per system rule but low-priority disable. Very borderline.
+  reversal.py config: lookback_seconds=900, bounce_pct=0.55 (AI-tuned 2026-02-14)
+ACTION: DISABLE reversal (flag for re-evaluation in 24h)
+LOG: 2026-02-17T04:10 UTC | DISABLED | reversal | wr=34.8% (24h) | paper_wr=42.8% (CONFLICT) | sharpe=-0.28 (48h)
+
+### FLAGGED FOR REVIEW (negative Sharpe > 80% of past 48h)
+Strategy           | 48h neg Sharpe % | Action
+rsi_divergence     |      95%         | FLAG - SELL signals problematic (35.3% WR vs BUY 44.5%)
+bb_squeeze         |      95%         | FLAG - but paper WR=45.3% (best), priority keep
+candle_patterns    |     100%         | FLAG - highest signal volume, marginal WR
+support_resistance |     100%         | FLAG - high volume but weakest adjusted WR
+NOTE: vwap_reversion at 79% (just under 80% threshold) → MONITOR closely
+
+### TOTAL PRUNE ACTIONS: 3 disabled, 4 flagged, 1 monitored
+
+================================================================================
+## SECTION 2: LIBRARIAN CANDIDATES
+================================================================================
+
+### strategy_scores.json status: NOT FOUND
+Librarian has not yet created the strategy_scores.json knowledge base file.
+Falling back to strategy_configs DB and numbered strategy files for candidates.
+
+### CANDIDATES EVALUATED (from strategy_configs DB - most recent Opus designs):
+1. strategy_025 (vol_volume_reversion) - designed 2026-02-17T02:57 for ranging_low_volatility
+2. strategy_023 (volatility_expansion_volume_breakout) - designed 2026-02-17T02:49
+
+### BACKTEST RESULTS:
+Strategy_025 (vol_volume_reversion):
+  Test: BTC-USDT, 5 days, 5m candles, 25.1M ticks available
+  Signals: 0 (ZERO signals generated)
+  Reason: RSI<35 AND 2 consecutive volume spikes simultaneously → too restrictive
+  BTC RSI was below 35 for only 15.5% of periods (needs BOTH conditions at once)
+  Verdict: NOT READY - parameter relaxation needed
+  Recommendation: Relax RSI threshold to 40, reduce volume_surge_threshold to 1.3x
+  Expected after tuning: 5-15% signal rate, test win rate
+
+Strategy_023 (volatility_expansion_volume_breakout):
+  Test: BTC-USDT, 5 days, 5m candles
+  Signals: 0 (ZERO signals generated)
+  Reason: 1.5% breakout threshold is massive for 5m crypto (needs 1.5% price move in 5min)
+    + requires 3 consecutive bars with volume > 1.8x average
+    + requires low volatility percentile (15th pctl)
+    ALL three conditions at once = essentially never fires
+  Verdict: NOT READY - breakout_threshold needs reduction to 0.3-0.5% for 5m data
+  Recommendation: Reduce breakout_threshold: 0.015→0.004, volume_multiplier: 1.8→1.3
+
+### NEW CANDIDATES ADDED TO WATCH LIST: 0 (both need tuning first)
+### LIBRARIAN ACTION REQUIRED: Create strategy_scores.json with library registry
+
+================================================================================
+## SECTION 3: PARAMETER ROTATION
+================================================================================
+
+### TOP 3 PERFORMERS (by combined paper trade WR + signal quality)
+Actual live configs from DB:
+1. bb_squeeze    - WR=45.3%, avg_pnl=-0.03% | lookback=1200s, [current: 1200s from DB]
+2. momentum      - WR=43.7%, avg_pnl=+0.05% | window_seconds=180, up_pct=0.8, down_pct=-0.8
+3. reversal      - WR=42.8%, avg_pnl=-0.07% | lookback_seconds=900, bounce_pct=0.55
+
+(Note: reversal is being disabled for WR reasons but still eligible for param rotation
+to understand what improvements would help upon re-enable)
+
+### ROTATION TEST RESULTS:
+
+#### BB_SQUEEZE (lookback_seconds=1200, squeeze detection)
+- KEY FINDING: Band width correlates with success
+  - band_width_pct < 0.5% → mostly losses (too tight = noise)
+  - band_width_pct > 0.7% → higher win rate
+- Current: lookback=1200s
+- TEST +5%: lookback=1260s → expected: slightly wider historical reference, fewer false squeezes
+- TEST -5%: lookback=1140s → expected: more responsive, may increase noise
+- TEST: Add band_width_pct filter ≥ 0.5% → RECOMMENDED (cuts low-quality signals)
+- RECOMMENDATION: Add minimum band_width_pct threshold of 0.5%
+  Expected impact: Reduce signals ~30%, improve WR from 45% → estimated 50-55%
+
+#### MOMENTUM (window_seconds=180, up_pct=0.8)
+- KEY FINDING: Change_pct values are 0.65-0.78% (below 0.8% threshold)
+  This means env var threshold may be ~0.5% (not 0.8% from DB config)
+  All signals at conf=0.99 (constant high confidence = no differentiation)
+- LIVE 48h: 41% WR, avg_pnl=-0.218% (worse than 24h aggregate)
+- TEST +5% window: 180s→189s → minimal impact expected
+- TEST -5% window: 180s→171s → faster signals
+- TEST +5% threshold: 0.8%→0.84% → filter weakest signals
+- KEY RECOMMENDATION: Increase up_pct/down_pct from 0.8% to 1.0%
+  Reasoning: 0.65-0.78% change_pct signals have poor outcomes
+  Filtering to ≥1.0% change_pct would cut signals by ~40%, improve selectivity
+  Expected: WR potentially 48-52% at higher threshold
+
+#### REVERSAL (lookback_seconds=900 [from config], bounce_pct=0.55)
+- KEY FINDING: reject_pct 0.35-0.69% in both wins and losses → not a strong filter
+- LIVE 48h (limited 50 trades): 64% WR, avg_pnl=+0.076%  
+- TEST +5%: lookback=945s → marginal effect expected
+- TEST -5%: lookback=855s → 
+- TEST: Increase bounce_pct from 0.55 to 0.65 (+18%) → require stronger bounce
+  Reasoning: Small bounces (0.35%) are as likely to win as large ones (0.69%)
+  Increasing threshold doesn't help much → look elsewhere for quality filter
+- RECOMMENDATION: Add a minimum volume confirmation (volume > avg*1.2 at reversal)
+  Filtering by volume at the bounce point would improve conviction
+
+### PARAMETER ROTATION LOG:
+2026-02-17T04:10 UTC | ROTATION_TEST | bb_squeeze | Band width analysis: losses at <0.5%, wins at >0.7% | REC: Add min_band_width=0.5% filter
+2026-02-17T04:10 UTC | ROTATION_TEST | momentum | Threshold analysis: 0.65-0.78% signals underperform | REC: Increase threshold to 1.0%
+2026-02-17T04:10 UTC | ROTATION_TEST | reversal | Reject pct not predictive | REC: Add volume confirmation at bounce
+
+================================================================================
+## SECTION 4: UNDERPERFORMER ROOT CAUSE ANALYSIS
+================================================================================
+
+### RSI DIVERGENCE (WR=36.4%, avg_pnl=-0.22%)
+Root cause: SELL signals are failing badly (35.3% WR vs BUY 44.5%)
+- BUY: 353 trades | 44.5% WR | avg_pnl=-0.015% → acceptable
+- SELL: 309 trades | 35.3% WR | avg_pnl=-0.356% → SELL signals dragging down performance
+- RSI winning avg: 46.3 (surprisingly NON-extreme)
+- RSI losing avg: 48.9
+- Problem: Strategy is triggering at mild RSI levels (20-30 for BUY, 70-80 for SELL)
+  but market regime (ranging) means extreme RSI is temporary, not persistent
+Recommendation: Disable SELL signals from rsi_divergence in ranging regime
+  Or: Increase overbought threshold from 80 to 85 to require more extreme readings
+
+### VWAP REVERSION (WR=38.4%, avg_pnl=-0.18%)
+Root cause: Triggering at deviations far below configured 1.20% threshold
+- Winning deviation avg: 0.537%
+- Losing deviation avg: 0.510%  
+- Deviation <0.5%: 37.5% WR (1058 trades!)
+- Deviation ≥0.5%: 41.6% WR (514 trades) → BETTER
+- Configured threshold: 1.20%, but actual signals fire at 0.40-0.69% → ENV VAR MISMATCH
+Action: Verify VWAP_DEVIATION_PCT env var, should match or exceed 0.70% for better selectivity
+  Higher deviation requirement correlates with better WR
+
+================================================================================
+## SECTION 5: SUMMARY & RECOMMENDATIONS
+================================================================================
+
+### TODAY'S ACTIONS:
+- DISABLED: 3 strategies (breakout, momentum, reversal)
+- FLAGGED for review: 4 strategies (rsi_divergence, bb_squeeze, candle_patterns, support_resistance)
+- MONITORED: 1 strategy (vwap_reversion)
+- NEW WINNERS added to watch list: 0 (library candidates not ready)
+- PARAMETER ROTATIONS logged: 3 (bb_squeeze, momentum, reversal)
+
+### WATCH LIST UPDATES:
+- Added: breakout_v2.py (needs parameter verification before live test)
+- Added: strategy_023 and strategy_025 (needs threshold tuning)
+- No new strategies promoted from watch list to live
+
+### RECOMMENDED NEXT ACTIONS (priority order):
+1. [HIGH] Fix VWAP env var: Verify VWAP_DEVIATION_PCT is set correctly (target: 0.70%+)
+2. [HIGH] Verify bb_squeeze doesn't auto-disable without clear cause (76% WR in some samples!)
+3. [HIGH] Add min band_width filter to bb_squeeze (≥0.5% band_width_pct)
+4. [MED]  Increase momentum up_pct/down_pct from 0.8% to 1.0% 
+5. [MED]  Disable RSI SELL signals in ranging regime OR increase overbought threshold to 85
+6. [MED]  Test breakout_v2.py on live data with new parameters (see watch list)
+7. [LOW]  Tune strategy_023/025 breakout_threshold: 0.015→0.004 before backtest retry
+8. [LOW]  Librarian: Create strategy_scores.json registry (needed for Adjuster integration)
+
+### RE-ENABLE SCHEDULE:
+- momentum: Re-evaluate in 24h (paper trades are positive, score metric may be misleading)
+- reversal: Re-evaluate in 24h (paper trades show 42.8% WR)
+- breakout: Re-evaluate after breakout_v2.py is validated (see watch list)
+
+### MARKET REGIME NOTE:
+Ranging_low_volatility has persisted for 4+ days. Most strategies underperform in this regime.
+Best performers in ranging markets: bb_squeeze (range-bound reversion) and reversal (bounce plays)
+Strategy design should focus on mean-reversion, not trend-following.
+
+================================================================================
+END OF RUN LOG - 2026-02-17 04:10 UTC
+================================================================================

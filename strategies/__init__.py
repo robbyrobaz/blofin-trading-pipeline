@@ -21,12 +21,25 @@ from .volume_spike import VolumeSpikeStrategy
 from .support_resistance import SupportResistanceStrategy
 from .macd_divergence import MACDDivergenceStrategy
 from .candle_patterns import CandlePatternsStrategy
+from .volume_mean_reversion import VolumeMeanReversionStrategy
+
+# New strategies (batch 2 — 2026-02-18)
+from .cross_asset_correlation import CrossAssetCorrelationStrategy
+from .volatility_regime_switch import VolatilityRegimeSwitchStrategy
+from .ml_random_forest_15m import MLRandomForest15mStrategy
+from .orderflow_imbalance import OrderflowImbalanceStrategy
+from .ensemble_top3 import EnsembleTop3Strategy
+
+# Ghost strategies implemented (2026-02-18)
+from .mtf_trend_align import MTFTrendAlignStrategy
+from .ml_gbt_5m import MLGbt5mStrategy
+from .mtf_momentum_confirm import MTFMomentumConfirmStrategy
 
 
 def get_all_strategies() -> List[BaseStrategy]:
     """
     Auto-discover and instantiate all strategy classes.
-    
+
     Returns:
         List of instantiated strategy objects
     """
@@ -42,8 +55,19 @@ def get_all_strategies() -> List[BaseStrategy]:
         SupportResistanceStrategy(),
         MACDDivergenceStrategy(),
         CandlePatternsStrategy(),
+        VolumeMeanReversionStrategy(),
+        # Batch 2: 2026-02-18
+        CrossAssetCorrelationStrategy(),
+        VolatilityRegimeSwitchStrategy(),
+        MLRandomForest15mStrategy(),
+        OrderflowImbalanceStrategy(),
+        EnsembleTop3Strategy(),
+        # Ghost strategies implemented: 2026-02-18
+        MTFTrendAlignStrategy(),
+        MLGbt5mStrategy(),
+        MTFMomentumConfirmStrategy(),
     ]
-    
+
     return strategies
 
 
@@ -62,4 +86,15 @@ __all__ = [
     'SupportResistanceStrategy',
     'MACDDivergenceStrategy',
     'CandlePatternsStrategy',
+    'VolumeMeanReversionStrategy',
+    # Batch 2
+    'CrossAssetCorrelationStrategy',
+    'VolatilityRegimeSwitchStrategy',
+    'MLRandomForest15mStrategy',
+    'OrderflowImbalanceStrategy',
+    'EnsembleTop3Strategy',
+    # Ghost strategies implemented
+    'MTFTrendAlignStrategy',
+    'MLGbt5mStrategy',
+    'MTFMomentumConfirmStrategy',
 ]
