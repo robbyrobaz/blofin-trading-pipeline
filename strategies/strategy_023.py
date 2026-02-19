@@ -20,11 +20,13 @@ class VolatilityExpansionVolumeBreakoutStrategy(BaseStrategy):
 
     def __init__(self):
         self.volatility_window     = 20
-        self.volatility_percentile = 15
-        # Lowered from 1.8 → 1.3: tick-based volume max ratio ~2.2x
-        self.volume_multiplier     = 1.3
-        # Lowered from 0.015 (1.5%) → 0.003 (0.3%): avg 5m move is 0.11%, max was 1.15%
-        self.breakout_threshold    = 0.003
+        # Raised from 15 → 30: wider squeeze detection in stable BTC data
+        self.volatility_percentile = 30
+        # Note: volume = tick-count (nearly constant). Set to 0.8 to disable volume gate.
+        # Real volume spikes require real trading volume data.
+        self.volume_multiplier     = 0.8
+        # Lowered from 0.015 (1.5%) → 0.002 (0.2%): avg 5m move is 0.11%, 0.2% is achievable
+        self.breakout_threshold    = 0.002
         self.min_volume_bars       = 3
         self.min_candles           = self.volatility_window + 5
 

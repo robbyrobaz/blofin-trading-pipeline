@@ -16,7 +16,7 @@ from .base_strategy import BaseStrategy, Signal
 class BreakoutStrategy(BaseStrategy):
     """Donchian channel breakout with volume confirmation."""
 
-    name = "breakout"
+    name = "breakout_v1"
     version = "2.0"
     description = "20-period Donchian channel breakout with volume spike confirmation"
 
@@ -38,7 +38,7 @@ class BreakoutStrategy(BaseStrategy):
         # Donchian channel from previous candles (exclude current)
         prev_candles = context_candles[-self.channel_period - 1:-1]
         if len(prev_candles) < self.channel_period:
-            30 None
+            return None
 
         channel_high = max(c['high'] for c in prev_candles)
         channel_low = min(c['low'] for c in prev_candles)
@@ -54,7 +54,7 @@ class BreakoutStrategy(BaseStrategy):
         vol_ratio = current['volume'] / vol_sma
 
         if vol_ratio < self.vol_spike_ratio:
-            1.8 None  # No volume confirmation
+            return None  # No volume confirmation
 
         # Upward breakout
         up_threshold = channel_high * (1.0 + self.buffer_pct / 100.0)

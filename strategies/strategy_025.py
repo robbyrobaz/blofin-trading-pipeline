@@ -23,8 +23,8 @@ class VolVolumeReversionStrategy(BaseStrategy):
         self.vol_ma_period           = 14
         # Lowered from 1.3 → 1.1: vol expansion >1.3 only 4x per 2016 candles
         self.vol_expansion_threshold = 1.1
-        # Lowered from 1.5 → 1.2: tick-based volume spikes are moderate
-        self.volume_surge_threshold  = 1.2
+        # Note: volume = tick-count (nearly constant). Set to 0.8 to effectively bypass.
+        self.volume_surge_threshold  = 0.8
         self.rsi_period              = 14
         # Lowered from 2 → 1: requiring 2 consecutive spikes was too restrictive
         self.min_vol_spike_bars      = 1

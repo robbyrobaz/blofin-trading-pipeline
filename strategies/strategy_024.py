@@ -22,8 +22,8 @@ class VolumeVolatilityMeanReversionStrategy(BaseStrategy):
         self.atr_period                   = 14
         self.atr_multiplier               = 1.5
         self.volume_ma_period             = 20
-        # Lowered from 1.2 → 1.0: require any above-average volume (was too selective)
-        self.volume_threshold             = 1.0
+        # Note: volume = tick-count (nearly constant). Set to 0.8 to effectively bypass.
+        self.volume_threshold             = 0.8
         self.rsi_period                   = 14
         # Loosened from 35 → 42: RSI < 35 occurred 122x/2016 candles; < 42 occurs 402x
         self.rsi_buy_threshold            = 42

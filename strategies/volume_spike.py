@@ -20,10 +20,12 @@ class VolumeSpikeStrategy(BaseStrategy):
 
     def __init__(self):
         self.lookback_candles    = int(os.getenv("VOLUME_SPIKE_LOOKBACK_CANDLES", "20"))
-        # Lowered from 2.5 → 1.5: tick-based volume max ratio ~2.2x, 2.5x was impossible
-        self.spike_multiplier    = float(os.getenv("VOLUME_SPIKE_MULTIPLIER", "1.5"))
-        # Lowered from 0.3 → 0.1: average 5m price change is ~0.11%, 0.3% was too rare
-        self.min_price_move_pct  = float(os.getenv("VOLUME_SPIKE_MIN_PRICE_MOVE_PCT", "0.1"))
+        # Note: 'volume' in DB is tick-count (not real volume), nearly constant.
+        # Setting multiplier to 0.8 effectively disables volume gate so the strategy
+        # acts as a pure price-momentum detector. Real volume support would need schema change.
+        self.spike_multiplier    = float(os.getenv("VOLUME_SPIKE_MULTIPLIER", "0.8"))
+        # Lowered from 0.3 → 0.15: price move is the real signal here
+        self.min_price_move_pct  = float(os.getenv("VOLUME_SPIKE_MIN_PRICE_MOVE_PCT", "0.15"))
         self.min_candles         = 10
 
     def detect(self, context_candles: list, symbol: str) -> Optional[dict]:

@@ -557,10 +557,10 @@ def phase2_backtest_tier0(
             counts["skipped"] += 1
             continue
 
-        # Stage 1: Smoke test with 5000 most recent rows (fast screening)
-        log.info("  Smoke-testing %s (5000 rows) …", name)
+        # Stage 1: Smoke test with 50000 most recent rows (fast screening)
+        log.info("  Smoke-testing %s (50000 rows) …", name)
         try:
-            smoke = run_backtest_for_strategy(adapter, symbols=["BTC-USDT"], limit_rows=5000)
+            smoke = run_backtest_for_strategy(adapter, symbols=["BTC-USDT"], limit_rows=50000)
         except Exception as exc:
             log.error("  [ERROR] %s smoke test crashed: %s", name, exc)
             counts["failed"] += 1
@@ -646,6 +646,152 @@ def phase2_backtest_tier0(
         "  Result: %d promoted to Tier 1, %d stayed at Tier 0, %d skipped",
         counts["promoted"], counts["failed"], counts["skipped"],
     )
+    return counts
+
+
+# ── Phase 2.5: Re-backtest Tier 1 strategies ────────────────────────────────
+
+# How many hours before a T1 strategy is considered stale and needs re-backtest
+T1_REBACKTEST_HOURS = 24
+# Trades threshold above which data is presumed corrupt (pre-fix era)
+T1_CORRUPT_TRADES_THRESHOLD = 10_000
+
+def phase2b_rebacktest_tier1(
+    adapters: Dict[str, StrategyAdapter],
+    registry: Dict[str, Dict],
+    dry_run: bool,
+) -> Dict[str, int]:
+    """
+    Re-backtest all Tier 1 strategies with FULL_SYMBOLS so Phase 3 has fresh
+    metrics to evaluate against promotion gates.
+
+    A T1 strategy is eligible for re-backtest if:
+      - Its bt_trades is absurdly large (>10K — indicates pre-BUY/SELL-fix corrupt data)
+      - OR bt_last_run is more than T1_REBACKTEST_HOURS hours ago
+      - OR it has never been backtested as T1 (bt_last_run < promoted_at)
+
+    Returns counts: {backtested, skipped, failed}
+    """
+    import math
+    from datetime import timedelta
+
+    log.info("─── Phase 2.5: Re-backtest Tier 1 (with FULL_SYMBOLS) ───")
+    tier1 = [r for r in registry.values() if r["tier"] == 1 and not r.get("archived")]
+    log.info("  %d Tier 1 strategies to evaluate for re-backtest", len(tier1))
+
+    now = datetime.now(timezone.utc)
+    stale_cutoff = now - timedelta(hours=T1_REBACKTEST_HOURS)
+
+    counts = {"backtested": 0, "skipped": 0, "failed": 0}
+    statements = []
+    ts = now_iso()
+
+    for row in tier1:
+        name = row["strategy_name"]
+        bt_trades   = row.get("bt_trades") or 0
+        bt_last_run = row.get("bt_last_run") or ""
+        promoted_at = row.get("promoted_at") or ""
+
+        # Determine if re-backtest is needed
+        corrupt_data = bt_trades > T1_CORRUPT_TRADES_THRESHOLD
+        stale = False
+        if bt_last_run:
+            try:
+                last_run_dt = datetime.fromisoformat(bt_last_run.replace("Z", "+00:00"))
+                stale = last_run_dt < stale_cutoff
+            except Exception:
+                stale = True
+        else:
+            stale = True
+
+        # Also re-test if bt_last_run predates promoted_at (never tested as T1)
+        never_tested_as_t1 = False
+        if promoted_at and bt_last_run:
+            try:
+                promoted_dt = datetime.fromisoformat(promoted_at.replace("Z", "+00:00"))
+                last_run_dt = datetime.fromisoformat(bt_last_run.replace("Z", "+00:00"))
+                never_tested_as_t1 = last_run_dt < promoted_dt
+            except Exception:
+                never_tested_as_t1 = True
+
+        needs_retest = corrupt_data or stale or never_tested_as_t1
+        if not needs_retest:
+            log.info("  [SKIP] %s — bt_last_run recent, data clean (%d trades)", name, bt_trades)
+            counts["skipped"] += 1
+            continue
+
+        reason = []
+        if corrupt_data:
+            reason.append(f"corrupt_data({bt_trades:,} trades)")
+        if stale:
+            reason.append(f"stale(last_run={bt_last_run[:19]})")
+        if never_tested_as_t1:
+            reason.append("never_tested_as_t1")
+        log.info("  Re-backtesting %s [%s] with FULL_SYMBOLS …", name, ", ".join(reason))
+
+        adapter = adapters.get(name)
+        if adapter is None:
+            log.warning("  [SKIP] %s — no adapter found", name)
+            counts["skipped"] += 1
+            continue
+
+        if dry_run:
+            log.info("    [DRY-RUN] Would re-backtest %s with FULL_SYMBOLS", name)
+            counts["backtested"] += 1
+            continue
+
+        try:
+            bt = run_backtest_for_strategy(adapter, symbols=FULL_SYMBOLS, limit_rows=500_000)
+        except Exception as exc:
+            log.error("  [ERROR] %s re-backtest crashed: %s", name, exc)
+            counts["failed"] += 1
+            continue
+
+        total_trades = bt["total_trades"]
+        log.info(
+            "  %s: %d trades, WR=%.1f%%, Sharpe=%.3f, MDD=%.1f%%, EEP=%.1f",
+            name, total_trades,
+            bt["win_rate"] * 100,
+            bt["sharpe"],
+            bt["max_dd"],
+            bt["eep_score"],
+        )
+
+        statements.append((
+            """
+            UPDATE strategy_registry SET
+                bt_win_rate  = ?,
+                bt_sharpe    = ?,
+                bt_pnl_pct   = ?,
+                bt_max_dd    = ?,
+                bt_trades    = ?,
+                bt_eep_score = ?,
+                bt_last_run  = ?,
+                updated_at   = ?
+            WHERE strategy_name = ?
+            """,
+            (
+                round(bt["win_rate"], 6),
+                round(bt["sharpe"], 6),
+                round(bt["pnl_pct"], 6),
+                round(bt["max_dd"], 6),
+                total_trades,
+                round(bt["eep_score"], 4),
+                ts,
+                ts,
+                name,
+            ),
+        ))
+        counts["backtested"] += 1
+
+    if not dry_run and statements:
+        written = db_batch_write(statements)
+        log.info("  Phase 2.5 complete: %d T1 strategies re-backtested, %d DB rows updated",
+                 counts["backtested"], written)
+    else:
+        log.info("  Phase 2.5 complete: backtested=%d, skipped=%d, failed=%d",
+                 counts["backtested"], counts["skipped"], counts["failed"])
+
     return counts
 
 
@@ -1008,6 +1154,7 @@ def phase6_design_new_strategy(
 def print_summary(
     new_registered: List[str],
     ph2: Dict[str, int],
+    ph2b: Dict[str, int],
     ph3: Dict[str, int],
     ph4: Dict[str, int],
     designed: Optional[Dict],
@@ -1019,17 +1166,19 @@ def print_summary(
     log.info("═" * 60)
     log.info("PIPELINE SUMMARY%s  (%.1fs)", mode, elapsed)
     log.info("═" * 60)
-    log.info("  Phase 1 — New strategies registered : %d", len(new_registered))
+    log.info("  Phase 1   — New strategies registered : %d", len(new_registered))
     if new_registered:
         for n in new_registered:
-            log.info("             • %s", n)
-    log.info("  Phase 2 — Tier 0 backtested         : promoted=%d, stayed=%d, skipped=%d",
+            log.info("               • %s", n)
+    log.info("  Phase 2   — Tier 0 backtested         : promoted=%d, stayed=%d, skipped=%d",
              ph2["promoted"], ph2["failed"], ph2["skipped"])
-    log.info("  Phase 3 — Tier 1 evaluated          : promoted=%d, stayed=%d",
+    log.info("  Phase 2.5 — Tier 1 re-backtested      : backtested=%d, skipped=%d, failed=%d",
+             ph2b["backtested"], ph2b["skipped"], ph2b["failed"])
+    log.info("  Phase 3   — Tier 1 evaluated          : promoted=%d, stayed=%d",
              ph3["promoted"], ph3["stayed"])
-    log.info("  Phase 4 — Tier 2 monitored          : updated=%d, demoted=%d",
+    log.info("  Phase 4   — Tier 2 monitored          : updated=%d, demoted=%d",
              ph4["updated"], ph4["demoted"])
-    log.info("  Phase 6 — Strategies designed       : %s",
+    log.info("  Phase 6   — Strategies designed       : %s",
              designed.get("strategy_name") if designed else "none")
     log.info("═" * 60)
 
@@ -1051,10 +1200,16 @@ def main() -> None:
         "--phase",
         type=int,
         choices=[1, 2, 3, 4, 5, 6],
-        help="Run only a specific phase (default: all phases)",
+        help="Run only a specific phase (1-6; use 2.5 via --rephase flag for T1 re-backtest)",
+    )
+    parser.add_argument(
+        "--skip-t1-rebacktest",
+        action="store_true",
+        help="Skip Phase 2.5 (T1 re-backtest). Use if you want fast Phase 3 evaluation only.",
     )
     args = parser.parse_args()
     dry_run = args.dry_run
+    skip_t1_rebacktest = args.skip_t1_rebacktest
 
     start = datetime.now(timezone.utc)
     log.info("=" * 60)
@@ -1086,9 +1241,10 @@ def main() -> None:
     # ── Execute phases ────────────────────────────────────────────────────────
     only_phase = args.phase
     new_registered: List[str] = []
-    ph2 = {"promoted": 0, "failed": 0, "skipped": 0}
-    ph3 = {"promoted": 0, "stayed": 0}
-    ph4 = {"updated": 0, "demoted": 0}
+    ph2  = {"promoted": 0, "failed": 0, "skipped": 0}
+    ph2b = {"backtested": 0, "skipped": 0, "failed": 0}
+    ph3  = {"promoted": 0, "stayed": 0}
+    ph4  = {"updated": 0, "demoted": 0}
     designed = None
 
     if not only_phase or only_phase == 1:
@@ -1102,6 +1258,16 @@ def main() -> None:
     if not only_phase or only_phase == 2:
         ph2 = phase2_backtest_tier0(adapters, registry, dry_run)
         # Refresh registry after promotions
+        if not dry_run:
+            conn = db_connect()
+            registry = get_registry(conn)
+            conn.close()
+
+    # Phase 2.5: Re-backtest Tier 1 strategies with FULL_SYMBOLS before gate check.
+    # Runs unless --skip-t1-rebacktest is passed or a specific other phase is requested.
+    if not only_phase and not skip_t1_rebacktest:
+        ph2b = phase2b_rebacktest_tier1(adapters, registry, dry_run)
+        # Always refresh registry so Phase 3 sees the fresh bt_* data
         if not dry_run:
             conn = db_connect()
             registry = get_registry(conn)
@@ -1136,7 +1302,7 @@ def main() -> None:
 
     # ── Summary ───────────────────────────────────────────────────────────────
     elapsed = (datetime.now(timezone.utc) - start).total_seconds()
-    print_summary(new_registered, ph2, ph3, ph4, designed, dry_run, elapsed)
+    print_summary(new_registered, ph2, ph2b, ph3, ph4, designed, dry_run, elapsed)
     log.info("PIPELINE DONE")
 
 

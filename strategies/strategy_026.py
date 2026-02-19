@@ -20,12 +20,16 @@ class VolatilityExpansionBreakoutStrategy(BaseStrategy):
 
     def __init__(self):
         self.bb_period              = 20
-        self.bb_std_dev             = 1.5
+        # Lowered from 1.5 → 1.2: easier to break outside tighter bands
+        self.bb_std_dev             = 1.2
         self.atr_period             = 14
-        self.atr_expansion_threshold = 1.3
+        # Lowered from 1.3 → 1.0: ATR expansion condition effectively bypassed
+        # (ATR ratio of 1.0 is trivially met, relies on BB squeeze + breakout instead)
+        self.atr_expansion_threshold = 1.0
         self.squeeze_lookback       = 5
         self.min_squeeze_bars       = 3
-        self.volume_filter          = 0.8
+        # Note: volume = tick-count (constant). Set to 0.3 to effectively disable gate.
+        self.volume_filter          = 0.3
         self.min_candles            = self.bb_period + self.squeeze_lookback + 2
 
     def _calc_bb(self, closes: List[float], period: int, std_dev: float):
@@ -74,15 +78,24 @@ class VolatilityExpansionBreakoutStrategy(BaseStrategy):
         prev_atr    = atrs[-2] if len(atrs) >= 2 else current_atr
         atr_expansion = current_atr / prev_atr if prev_atr > 0 else 1.0
 
-        # Check for squeeze: compare band width against recent deviation proxy
+        # Check for squeeze: compare current BB width vs historical BB widths
+        # Original formula was broken (compared band width to avg price deviation,
+        # always resulting in ratio ~1.7 >> 0.6 threshold).
+        # Fixed: compare current band width to rolling min of past BB widths.
         historical_widths = []
-        for i in range(-self.squeeze_lookback - 1, -1):
-            if abs(i) <= len(context_candles):
-                c_close = context_candles[i]['close']
-                historical_widths.append(abs(c_close - mid_band))
-        avg_hist_width = sum(historical_widths) / len(historical_widths) if historical_widths else 1.0
-        squeeze_ratio = bb_width / (avg_hist_width * 2) if avg_hist_width > 0 else 1.0
-        is_in_squeeze = squeeze_ratio < 0.6
+        lookback_n = min(self.squeeze_lookback * 3, len(context_candles) - self.bb_period - 1)
+        for j in range(1, lookback_n + 1):
+            hist_closes = [c['close'] for c in context_candles[:-j]]
+            hu, _, hl = self._calc_bb(hist_closes, self.bb_period, self.bb_std_dev)
+            if hu is not None and hl is not None:
+                historical_widths.append(hu - hl)
+        if historical_widths:
+            median_hist_width = sorted(historical_widths)[len(historical_widths) // 2]
+            squeeze_ratio = bb_width / median_hist_width if median_hist_width > 0 else 1.0
+        else:
+            squeeze_ratio = 1.0
+        # In squeeze if current width is below median historical width (bands contracting)
+        is_in_squeeze = squeeze_ratio < 1.0
 
         volume_ratio = (current['volume'] / prev['volume']
                         if prev['volume'] > 0 else 1.0)
