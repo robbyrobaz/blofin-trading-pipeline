@@ -1,105 +1,148 @@
 #!/usr/bin/env python3
 """
-Strategy Name: Volume Volatility Mean Reversion
-Type: volatility/volume + mean-reversion hybrid
-Timeframe: 5m
-Description: Exploits volatility expansion with volume confirmation in ranging markets. 
-Trades mean reversion pullbacks when volatility increases and volume supports the reversal.
-Avoids pure Bollinger Band squeeze patterns by using ATR and volume as primary filters.
-"""
+Strategy 024: Volume Volatility Mean Reversion — candle-based interface.
+Type: volatility/volume + mean-reversion hybrid, Timeframe: 5m
 
-class Strategy:
+Exploits volatility expansion with volume confirmation in ranging markets.
+Trades mean-reversion pullbacks when ATR expands and volume supports reversal.
+"""
+from typing import Optional, Dict, Any, List
+
+from .base_strategy import BaseStrategy
+
+
+class VolumeVolatilityMeanReversionStrategy(BaseStrategy):
+    """Volatility expansion + volume-confirmed mean-reversion (candle-based)."""
+
+    name = "volume_volatility_mean_reversion"
+    version = "2.0"
+    description = "Mean-reversion in volatility-expanding regimes confirmed by volume"
+
     def __init__(self):
-        self.name = "volume_volatility_mean_reversion"
-        self.params = {
-            "atr_period": 14,
-            "atr_multiplier": 1.5,
-            "volume_ma_period": 20,
-            "volume_threshold": 1.2,
-            "rsi_period": 14,
-            "rsi_buy_threshold": 35,
-            "rsi_sell_threshold": 65,
-            "min_candles": 30,
-            "volatility_expansion_threshold": 1.3
+        self.atr_period                   = 14
+        self.atr_multiplier               = 1.5
+        self.volume_ma_period             = 20
+        # Lowered from 1.2 → 1.0: require any above-average volume (was too selective)
+        self.volume_threshold             = 1.0
+        self.rsi_period                   = 14
+        # Loosened from 35 → 42: RSI < 35 occurred 122x/2016 candles; < 42 occurs 402x
+        self.rsi_buy_threshold            = 42
+        # Loosened from 65 → 58: RSI > 65 occurred 182x; > 58 occurs 486x
+        self.rsi_sell_threshold           = 58
+        self.min_candles                  = 30
+        # Lowered from 1.3 → 1.1: ATR expansion >1.3 only 4x in 2016 candles; >1.1 is 52x
+        self.volatility_expansion_thresh  = 1.1
+
+    def _calc_atr(self, candles: list, period: int) -> List[float]:
+        """Return ATR series for the candle list."""
+        n = len(candles)
+        if n < 2:
+            return [0.0] * n
+        trs = []
+        trs.append(candles[0]['high'] - candles[0]['low'])
+        for i in range(1, n):
+            h, l, pc = candles[i]['high'], candles[i]['low'], candles[i-1]['close']
+            trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+        atrs = [0.0] * n
+        if n >= period:
+            atrs[period - 1] = sum(trs[:period]) / period
+            for i in range(period, n):
+                atrs[i] = (atrs[i - 1] * (period - 1) + trs[i]) / period
+        return atrs
+
+    def _calc_rsi(self, closes: List[float], period: int) -> float:
+        """Return current RSI value."""
+        if len(closes) < period + 1:
+            return 50.0
+        gains, losses = [], []
+        for i in range(1, len(closes)):
+            d = closes[i] - closes[i - 1]
+            gains.append(max(d, 0.0))
+            losses.append(max(-d, 0.0))
+        ag = sum(gains[:period]) / period
+        al = sum(losses[:period]) / period
+        for i in range(period, len(gains)):
+            ag = (ag * (period - 1) + gains[i]) / period
+            al = (al * (period - 1) + losses[i]) / period
+        if al == 0:
+            return 100.0 if ag > 0 else 50.0
+        return 100.0 - 100.0 / (1.0 + ag / al)
+
+    def detect(self, context_candles: list, symbol: str) -> Optional[dict]:
+        if len(context_candles) < self.min_candles:
+            return None
+
+        current = context_candles[-1]
+        prev    = context_candles[-2]
+
+        atrs = self._calc_atr(context_candles, self.atr_period)
+        current_atr = atrs[-1]
+        prev_atr    = atrs[-2] if len(atrs) >= 2 else 0
+
+        closes = [c['close'] for c in context_candles]
+        rsi = self._calc_rsi(closes, self.rsi_period)
+
+        volumes = [c['volume'] for c in context_candles[-self.volume_ma_period:]]
+        volume_ma = sum(volumes) / len(volumes) if volumes else 0
+        current_volume = current['volume']
+
+        volatility_expanding = (prev_atr > 0 and
+                                current_atr > prev_atr * self.volatility_expansion_thresh)
+        volume_confirmed = (volume_ma > 0 and
+                            current_volume > volume_ma * self.volume_threshold)
+
+        if (volatility_expanding and volume_confirmed and
+                rsi < self.rsi_buy_threshold and
+                current['close'] < prev['close']):
+            confidence = 0.5
+            if current_atr > prev_atr * self.volatility_expansion_thresh:
+                confidence += 0.15
+            if current_volume > volume_ma * self.volume_threshold:
+                confidence += 0.15
+            if rsi < 30:
+                confidence += 0.10
+            return {
+                'signal': 'BUY',
+                'strategy': self.name,
+                'confidence': round(min(confidence, 1.0), 4),
+                'rsi': round(rsi, 2),
+                'atr_ratio': round(current_atr / prev_atr if prev_atr > 0 else 0, 3),
+            }
+
+        if (volatility_expanding and volume_confirmed and
+                rsi > self.rsi_sell_threshold and
+                current['close'] > prev['close']):
+            confidence = 0.5
+            if current_atr > prev_atr * self.volatility_expansion_thresh:
+                confidence += 0.15
+            if current_volume > volume_ma * self.volume_threshold:
+                confidence += 0.15
+            if rsi > 70:
+                confidence += 0.10
+            return {
+                'signal': 'SELL',
+                'strategy': self.name,
+                'confidence': round(min(confidence, 1.0), 4),
+                'rsi': round(rsi, 2),
+                'atr_ratio': round(current_atr / prev_atr if prev_atr > 0 else 0, 3),
+            }
+
+        return None
+
+    def get_config(self) -> Dict[str, Any]:
+        return {
+            'atr_period': self.atr_period,
+            'volume_ma_period': self.volume_ma_period,
+            'volume_threshold': self.volume_threshold,
+            'rsi_buy_threshold': self.rsi_buy_threshold,
+            'rsi_sell_threshold': self.rsi_sell_threshold,
         }
-    
-    def analyze(self, candles, indicators):
-        """
-        Analyze market data and generate signal.
-        
-        Args:
-            candles: List of recent candles [{open, high, low, close, volume}, ...]
-            indicators: Dict of pre-calculated indicators {rsi, macd, bbands, atr, etc.}
-        
-        Returns:
-            'BUY', 'SELL', or 'HOLD'
-        """
-        if len(candles) < self.params["min_candles"]:
-            return 'HOLD'
-        
-        current_candle = candles[-1]
-        prev_candle = candles[-2]
-        
-        # Get current indicators
-        current_atr = indicators.get('atr', [0])[-1] if indicators.get('atr') else 0
-        atr_prev = indicators.get('atr', [0])[-2] if len(indicators.get('atr', [])) > 1 else 0
-        
-        current_rsi = indicators.get('rsi', [50])[-1] if indicators.get('rsi') else 50
-        current_volume = current_candle.get('volume', 0)
-        
-        # Calculate volume MA
-        volumes = [c.get('volume', 0) for c in candles[-self.params["volume_ma_period"]:]]
-        volume_ma = sum(volumes) / len(volumes) if volumes else 0
-        
-        # Volatility expansion condition
-        volatility_expanding = current_atr > atr_prev * self.params["volatility_expansion_threshold"] if atr_prev > 0 else False
-        
-        # Volume confirmation
-        volume_confirmed = current_volume > volume_ma * self.params["volume_threshold"]
-        
-        # BUY Signal: Volatility expanding + Volume surge + RSI oversold + Price pullback
-        if (volatility_expanding and 
-            volume_confirmed and 
-            current_rsi < self.params["rsi_buy_threshold"] and
-            current_candle.get('close', 0) < prev_candle.get('close', 0)):
-            return 'BUY'
-        
-        # SELL Signal: Volatility expanding + Volume surge + RSI overbought + Price bounce
-        if (volatility_expanding and 
-            volume_confirmed and 
-            current_rsi > self.params["rsi_sell_threshold"] and
-            current_candle.get('close', 0) > prev_candle.get('close', 0)):
-            return 'SELL'
-        
-        return 'HOLD'
-    
-    def get_confidence(self, candles, indicators):
-        """Return confidence score 0-1 for current signal."""
-        if len(candles) < self.params["min_candles"]:
-            return 0.0
-        
-        current_candle = candles[-1]
-        current_atr = indicators.get('atr', [0])[-1] if indicators.get('atr') else 0
-        atr_prev = indicators.get('atr', [0])[-2] if len(indicators.get('atr', [])) > 1 else 0
-        current_rsi = indicators.get('rsi', [50])[-1] if indicators.get('rsi') else 50
-        current_volume = current_candle.get('volume', 0)
-        
-        # Calculate volume MA
-        volumes = [c.get('volume', 0) for c in candles[-self.params["volume_ma_period"]:]]
-        volume_ma = sum(volumes) / len(volumes) if volumes else 0
-        
-        confidence = 0.5
-        
-        # Boost confidence on volatility expansion
-        if current_atr > atr_prev * self.params["volatility_expansion_threshold"] and atr_prev > 0:
-            confidence += 0.15
-        
-        # Boost confidence on volume spike
-        if current_volume > volume_ma * self.params["volume_threshold"]:
-            confidence += 0.15
-        
-        # RSI extremes add confidence
-        if current_rsi < 30 or current_rsi > 70:
-            confidence += 0.1
-        
-        return min(confidence, 1.0)
+
+    def update_config(self, params: Dict[str, Any]) -> None:
+        for key in ('atr_period', 'volume_ma_period'):
+            if key in params:
+                setattr(self, key, int(params[key]))
+        for key in ('volume_threshold', 'rsi_buy_threshold', 'rsi_sell_threshold',
+                    'atr_multiplier', 'volatility_expansion_thresh'):
+            if key in params:
+                setattr(self, key, float(params[key]))

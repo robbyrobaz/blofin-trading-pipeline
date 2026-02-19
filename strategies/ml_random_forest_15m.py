@@ -1,99 +1,41 @@
 #!/usr/bin/env python3
 """
-ML Random Forest 15m Strategy
+ML Random Forest 15m Strategy — candle-based interface.
 
-Random forest classifier trained on 20 technical features at 15m timeframe.
-Trains on first 70% of available data per symbol.
-Generates BUY/SELL signals only when confidence >= 60%.
-
-Comparison target: ml_gbt_5m (GBT on 5m candles).
-
-Reference: new_strategies_backtest.py → strategy_ml_random_forest_15m
+Random Forest classifier trained on 20 technical features.
+Uses context_candles directly for both training (lazy, first call per symbol)
+and inference. Requires sklearn; returns None gracefully if unavailable.
 """
-
 import os
-import sqlite3
 import numpy as np
-from typing import Optional, Dict, Any, List, Tuple
-from datetime import datetime, timedelta
+from typing import Optional, Dict, Any
+from datetime import datetime
 
-from .base_strategy import BaseStrategy, Signal
+from .base_strategy import BaseStrategy
 
-DB_PATH = os.getenv("BLOFIN_DB_PATH", "data/blofin_monitor.db")
 CONFIDENCE_THRESHOLD = float(os.getenv("RF15M_CONFIDENCE_THRESH", "0.60"))
-LOOKBACK_DAYS = int(os.getenv("RF15M_LOOKBACK_DAYS", "10"))
 
 
 class MLRandomForest15mStrategy(BaseStrategy):
-    """
-    Random Forest classifier on 15-minute OHLCV candles.
-
-    Features (20):
-      RSI(7,14,21), EMA ratios (5/50, 10/50, 20/50),
-      price vs EMA, BB position, normalized ATR,
-      ROC(3,5,10), candle body/wicks, volume z-score,
-      1-bar return, 2-bar lagged return.
-
-    Trains once per symbol on startup (lazy, on first signal request),
-    then operates in inference mode.
-    """
+    """Random Forest classifier on OHLCV candles with 20 technical features."""
 
     name = "ml_random_forest_15m"
-    version = "1.0"
-    description = "Random Forest classifier on 15m candles with 20 features"
+    version = "2.0"
+    description = "Random Forest classifier on candle OHLCV data with 20 features"
 
     def __init__(self):
         self.confidence_threshold = CONFIDENCE_THRESHOLD
-        self.lookback_days = LOOKBACK_DAYS
-        self._models: Dict[str, Any] = {}   # symbol → (model, scaler, last_trained_ts)
+        self._models: Dict[str, Any] = {}
         self._retrain_interval_hours = 24
         self._sklearn_available = self._check_sklearn()
 
     def _check_sklearn(self) -> bool:
         try:
-            from sklearn.ensemble import RandomForestClassifier
-            from sklearn.preprocessing import StandardScaler
+            from sklearn.ensemble import RandomForestClassifier  # noqa
+            from sklearn.preprocessing import StandardScaler     # noqa
             return True
         except ImportError:
             return False
-
-    def _load_ohlcv_15m(self, symbol: str) -> Optional[np.ndarray]:
-        """Load 15m OHLCV candles from DB."""
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            end_ts = int(datetime.now().timestamp() * 1000)
-            start_ts = end_ts - (self.lookback_days * 24 * 3600 * 1000)
-            c.execute(
-                "SELECT ts_ms, price FROM ticks WHERE symbol=? AND ts_ms>=? AND ts_ms<=? ORDER BY ts_ms ASC",
-                (symbol, start_ts, end_ts)
-            )
-            rows = c.fetchall()
-            conn.close()
-
-            if len(rows) < 100:
-                return None
-
-            ticks = np.array(rows, dtype=float)
-            period_ms = 15 * 60 * 1000
-            first_period = (ticks[0, 0] // period_ms) * period_ms
-            pidx = ((ticks[:, 0] - first_period) // period_ms).astype(int)
-
-            candles = []
-            for pid in np.unique(pidx):
-                mask = pidx == pid
-                pts = ticks[mask]
-                if len(pts) < 2:
-                    continue
-                candles.append([
-                    pts[0, 0], pts[0, 1],
-                    pts[:, 1].max(), pts[:, 1].min(),
-                    pts[-1, 1], float(len(pts))
-                ])
-
-            return np.array(candles) if len(candles) >= 50 else None
-        except Exception:
-            return None
 
     def _ema(self, prices, period):
         result = np.zeros(len(prices))
@@ -117,7 +59,7 @@ class MLRandomForest15mStrategy(BaseStrategy):
             l = max(0.0, -deltas[i - 1])
             ag = (ag * (period - 1) + g) / period
             al = (al * (period - 1) + l) / period
-            result[i] = 100 - (100 / (1 + ag / al)) if al > 0 else 100
+            result[i] = 100 - (100 / (1 + ag / al)) if al > 0 else 100.0
         return result
 
     def _atr(self, high, low, close, period=14):
@@ -127,7 +69,9 @@ class MLRandomForest15mStrategy(BaseStrategy):
         tr = np.zeros(n)
         tr[0] = high[0] - low[0]
         for i in range(1, n):
-            tr[i] = max(high[i] - low[i], abs(high[i] - close[i-1]), abs(low[i] - close[i-1]))
+            tr[i] = max(high[i] - low[i],
+                        abs(high[i] - close[i-1]),
+                        abs(low[i]  - close[i-1]))
         result = np.full(n, np.nan)
         result[period - 1] = np.mean(tr[:period])
         for i in range(period, n):
@@ -148,17 +92,21 @@ class MLRandomForest15mStrategy(BaseStrategy):
         ])
         return mid + std_mult * std, mid, mid - std_mult * std
 
-    def _build_features(self, candles: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
-        """Build (X, y) feature matrix."""
+    def _candles_to_arrays(self, candles: list):
+        """Convert list-of-dicts candles to numpy arrays."""
         n = len(candles)
+        open_  = np.array([c['open']   for c in candles], dtype=float)
+        high   = np.array([c['high']   for c in candles], dtype=float)
+        low    = np.array([c['low']    for c in candles], dtype=float)
+        close  = np.array([c['close']  for c in candles], dtype=float)
+        volume = np.array([c['volume'] for c in candles], dtype=float)
+        return open_, high, low, close, volume
+
+    def _build_features(self, open_, high, low, close, volume):
+        """Build (X, y) feature/target arrays. Needs ≥55 candles."""
+        n = len(close)
         if n < 55:
             return np.array([]), np.array([])
-
-        open_  = candles[:, 1]
-        high   = candles[:, 2]
-        low    = candles[:, 3]
-        close  = candles[:, 4]
-        volume = candles[:, 5]
 
         rsi7  = self._rsi(close, 7)
         rsi14 = self._rsi(close, 14)
@@ -172,7 +120,6 @@ class MLRandomForest15mStrategy(BaseStrategy):
         vol_s20 = self._sma(volume, 20)
 
         features, targets = [], []
-
         for i in range(55, n - 1):
             if (np.isnan(rsi7[i]) or np.isnan(rsi14[i]) or np.isnan(rsi21[i]) or
                     np.isnan(bb_up[i]) or np.isnan(atr14[i]) or
@@ -188,12 +135,12 @@ class MLRandomForest15mStrategy(BaseStrategy):
             body   = (close[i] - open_[i]) / close[i] * 100
             wick_u = (high[i] - max(open_[i], close[i])) / close[i] * 100
             wick_l = (min(open_[i], close[i]) - low[i]) / close[i] * 100
-            vol_z  = (volume[i] - vol_s20[i]) / (np.std(volume[max(0, i - 20):i]) + 1e-8)
+            vol_z  = (volume[i] - vol_s20[i]) / (np.std(volume[max(0, i-20):i]) + 1e-8)
             ret1   = (close[i] - close[i - 1]) / close[i - 1] * 100 if close[i - 1] > 0 else 0
-            ret2   = (close[i - 1] - close[i - 2]) / close[i - 2] * 100 if close[i - 2] > 0 else 0
+            ret2   = (close[i-1] - close[i-2]) / close[i-2] * 100 if close[i-2] > 0 else 0
 
             features.append([
-                rsi7[i] / 100, rsi14[i] / 100, rsi21[i] / 100,
+                rsi7[i]/100, rsi14[i]/100, rsi21[i]/100,
                 (e5[i]  - e50[i]) / e50[i],
                 (e10[i] - e50[i]) / e50[i],
                 (e20[i] - e50[i]) / e50[i],
@@ -201,44 +148,42 @@ class MLRandomForest15mStrategy(BaseStrategy):
                 (close[i] - e20[i]) / e20[i],
                 bb_pos,
                 atr14[i] / close[i],
-                roc3 / 10, roc5 / 10, roc10 / 10,
-                body / 5, wick_u / 3, wick_l / 3,
-                min(vol_z / 3, 5.0),
+                roc3/10, roc5/10, roc10/10,
+                body/5, wick_u/3, wick_l/3,
+                min(vol_z/3, 5.0),
                 (high[i] - low[i]) / close[i] * 100,
                 ret1, ret2,
             ])
             targets.append(1 if close[i + 1] > close[i] else 0)
 
-        return (np.array(features), np.array(targets)) if features else (np.array([]), np.array([]))
+        if not features:
+            return np.array([]), np.array([])
+        return np.array(features), np.array(targets)
 
-    def _train_model(self, symbol: str):
-        """Train RF model for a symbol. Called lazily on first detect()."""
+    def _train_model(self, symbol: str, candles: list):
+        """Train RF model from provided candles."""
         from sklearn.ensemble import RandomForestClassifier
         from sklearn.preprocessing import StandardScaler
 
-        candles = self._load_ohlcv_15m(symbol)
-        if candles is None or len(candles) < 150:
+        if len(candles) < 150:
             return
 
-        X, y = self._build_features(candles)
+        open_, high, low, close, volume = self._candles_to_arrays(candles)
+        X, y = self._build_features(open_, high, low, close, volume)
         if len(X) < 100:
             return
 
         split = int(len(X) * 0.70)
-        X_train = X[:split]
-        y_train = y[:split]
-
         scaler = StandardScaler()
-        X_train_s = scaler.fit_transform(X_train)
+        X_train_s = scaler.fit_transform(X[:split])
 
         rf = RandomForestClassifier(
             n_estimators=100, max_depth=6, min_samples_leaf=10,
             class_weight='balanced', random_state=42, n_jobs=-1,
         )
-        rf.fit(X_train_s, y_train)
+        rf.fit(X_train_s, y[:split])
         self._models[symbol] = {
             'model': rf, 'scaler': scaler,
-            'candles': candles,   # keep reference for inference features
             'trained_at': datetime.now().timestamp(),
         }
 
@@ -248,21 +193,15 @@ class MLRandomForest15mStrategy(BaseStrategy):
         trained_at = self._models[symbol].get('trained_at', 0)
         return (datetime.now().timestamp() - trained_at) > self._retrain_interval_hours * 3600
 
-    def detect(
-        self,
-        symbol: str,
-        price: float,
-        volume: float,
-        ts_ms: int,
-        prices: List[Tuple[int, float]],
-        volumes: List[Tuple[int, float]]
-    ) -> Optional[Signal]:
-
+    def detect(self, context_candles: list, symbol: str) -> Optional[dict]:
         if not self._sklearn_available:
             return None
 
+        if len(context_candles) < 60:
+            return None
+
         if self._should_retrain(symbol):
-            self._train_model(symbol)
+            self._train_model(symbol, context_candles)
 
         if symbol not in self._models:
             return None
@@ -271,51 +210,36 @@ class MLRandomForest15mStrategy(BaseStrategy):
         model  = model_data['model']
         scaler = model_data['scaler']
 
-        # Build feature vector from recent price history
-        window_60m = self._slice_window(prices, ts_ms, 90 * 60)
-        if len(window_60m) < 60:
-            return None
-
-        # Assemble pseudo-candle array from window
-        px_arr = np.array([p for _, p in window_60m])
-        n = len(px_arr)
-        if n < 55:
-            return None
-
-        # Derive arrays for feature building
-        # Create a minimal candle-like structure from the tick stream
-        fake_candles = np.zeros((n, 6))
-        for i in range(n):
-            fake_candles[i] = [0, px_arr[i], px_arr[i], px_arr[i], px_arr[i], 1.0]
-
-        X, _ = self._build_features(fake_candles)
+        open_, high, low, close, volume = self._candles_to_arrays(context_candles)
+        X, _ = self._build_features(open_, high, low, close, volume)
         if len(X) == 0:
             return None
 
-        # Use last available feature vector
-        feat = X[-1:].copy()
-        feat_s = scaler.transform(feat)
+        feat_s = scaler.transform(X[-1:])
         prob = model.predict_proba(feat_s)[0, 1]
 
         if prob >= self.confidence_threshold:
-            return Signal(
-                symbol=symbol, signal="BUY", strategy=self.name,
-                confidence=round(prob, 3),
-                details={"prob_up": round(prob, 3), "timeframe": "15m"}
-            )
+            return {
+                'signal': 'BUY',
+                'strategy': self.name,
+                'confidence': round(prob, 3),
+                'prob_up': round(prob, 3),
+                'timeframe': '15m',
+            }
         elif prob <= (1 - self.confidence_threshold):
-            return Signal(
-                symbol=symbol, signal="SELL", strategy=self.name,
-                confidence=round(1 - prob, 3),
-                details={"prob_up": round(prob, 3), "timeframe": "15m"}
-            )
+            return {
+                'signal': 'SELL',
+                'strategy': self.name,
+                'confidence': round(1 - prob, 3),
+                'prob_up': round(prob, 3),
+                'timeframe': '15m',
+            }
 
         return None
 
     def get_config(self) -> Dict[str, Any]:
         return {
             "confidence_threshold": self.confidence_threshold,
-            "lookback_days": self.lookback_days,
             "retrain_interval_hours": self._retrain_interval_hours,
             "trained_symbols": list(self._models.keys()),
         }
@@ -323,7 +247,5 @@ class MLRandomForest15mStrategy(BaseStrategy):
     def update_config(self, params: Dict[str, Any]) -> None:
         if "confidence_threshold" in params:
             self.confidence_threshold = float(params["confidence_threshold"])
-        if "lookback_days" in params:
-            self.lookback_days = int(params["lookback_days"])
         if "retrain_interval_hours" in params:
             self._retrain_interval_hours = float(params["retrain_interval_hours"])

@@ -1,72 +1,34 @@
 #!/usr/bin/env python3
 """
-Volatility Regime Switch Strategy
+Volatility Regime Switch Strategy — candle-based interface.
 
 Classifies market regime and applies appropriate entry rules:
-  - TRENDING  (ADX > 25, ATR in top 60th percentile): EMA alignment
+  - TRENDING  (ADX > 25, ATR in top 60th percentile): EMA alignment crossover
   - RANGING   (ADX < 25): Bollinger Band mean reversion
   - CHAOTIC   (ADX > 45): No trade — sit out
-
-Reference: new_strategies_backtest.py → strategy_volatility_regime_switch
 """
-
 import os
 import numpy as np
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any
 
-from .base_strategy import BaseStrategy, Signal
+from .base_strategy import BaseStrategy
 
 
 class VolatilityRegimeSwitchStrategy(BaseStrategy):
-    """
-    Regime-aware strategy that switches logic based on ATR percentile + ADX.
-
-    TRENDING  → follow trend (EMA 5/13/21 alignment crossover)
-    RANGING   → mean-revert at Bollinger Band extremes
-    CHAOTIC   → flat / no signal
-    """
+    """Regime-aware strategy: trend-follow / mean-revert / sit-out."""
 
     name = "volatility_regime_switch"
-    version = "1.0"
+    version = "2.0"
     description = "Regime-aware: trend-follow / mean-revert / sit-out based on ATR + ADX"
 
     def __init__(self):
-        self.atr_period = int(os.getenv("VRS_ATR_PERIOD", "14"))
-        self.adx_period = int(os.getenv("VRS_ADX_PERIOD", "14"))
+        self.atr_period        = int(os.getenv("VRS_ATR_PERIOD", "14"))
+        self.adx_period        = int(os.getenv("VRS_ADX_PERIOD", "14"))
         self.adx_trend_thresh  = float(os.getenv("VRS_ADX_TREND_THRESH", "25.0"))
         self.adx_chaos_thresh  = float(os.getenv("VRS_ADX_CHAOS_THRESH", "45.0"))
         self.atr_pct_window    = int(os.getenv("VRS_ATR_PCT_WINDOW", "50"))
         self.atr_pct_threshold = float(os.getenv("VRS_ATR_PCT_THRESHOLD", "0.60"))
-
-    # ── Low-level helpers (work on lists of (ts, price)) ──
-
-    def _to_ohlcv(self, prices_window: List[Tuple[int, float]], period_ms: int = 300_000):
-        """Aggregate price ticks into OHLCV candles at given period."""
-        if len(prices_window) < 4:
-            return [], [], [], []
-
-        period_idx_fn = lambda ts: ts // period_ms
-        buckets: Dict[int, List[float]] = {}
-        for ts, px in prices_window:
-            k = period_idx_fn(ts)
-            if k not in buckets:
-                buckets[k] = []
-            buckets[k].append(px)
-
-        sorted_keys = sorted(buckets.keys())
-        opens  = []
-        highs  = []
-        lows   = []
-        closes = []
-        for k in sorted_keys:
-            ps = buckets[k]
-            opens.append(ps[0])
-            highs.append(max(ps))
-            lows.append(min(ps))
-            closes.append(ps[-1])
-
-        return (np.array(opens), np.array(highs),
-                np.array(lows),  np.array(closes))
+        self.min_candles = 40
 
     def _ema(self, prices: np.ndarray, period: int) -> np.ndarray:
         result = np.zeros(len(prices))
@@ -93,7 +55,6 @@ class VolatilityRegimeSwitchStrategy(BaseStrategy):
         return result
 
     def _adx(self, high, low, close, period=14):
-        """Simplified ADX computation."""
         n = len(close)
         if n < period * 2 + 5:
             return np.full(n, np.nan)
@@ -101,15 +62,13 @@ class VolatilityRegimeSwitchStrategy(BaseStrategy):
         minus_dm = np.zeros(n)
         tr       = np.zeros(n)
         for i in range(1, n):
-            up   = high[i]   - high[i - 1]
+            up   = high[i]    - high[i - 1]
             down = low[i - 1] - low[i]
             plus_dm[i]  = up   if (up > down and up > 0)   else 0.0
             minus_dm[i] = down if (down > up and down > 0) else 0.0
             tr[i] = max(high[i] - low[i],
                         abs(high[i] - close[i - 1]),
                         abs(low[i]  - close[i - 1]))
-
-        # Wilder smoothing
         tr_s   = np.full(n, np.nan)
         pdm_s  = np.full(n, np.nan)
         mdm_s  = np.full(n, np.nan)
@@ -118,17 +77,14 @@ class VolatilityRegimeSwitchStrategy(BaseStrategy):
         tr_s[period]  = np.sum(tr[1:period + 1])
         pdm_s[period] = np.sum(plus_dm[1:period + 1])
         mdm_s[period] = np.sum(minus_dm[1:period + 1])
-
         for i in range(period + 1, n):
             tr_s[i]  = tr_s[i-1]  - tr_s[i-1]  / period + tr[i]
             pdm_s[i] = pdm_s[i-1] - pdm_s[i-1] / period + plus_dm[i]
             mdm_s[i] = mdm_s[i-1] - mdm_s[i-1] / period + minus_dm[i]
-
         pdi = np.where(tr_s > 0, 100 * pdm_s / tr_s, 0.0)
         mdi = np.where(tr_s > 0, 100 * mdm_s / tr_s, 0.0)
         dx  = np.where((pdi + mdi) > 0,
                        100 * np.abs(pdi - mdi) / (pdi + mdi), 0.0)
-
         adx_out = np.full(n, np.nan)
         start = period * 2
         if start >= n:
@@ -155,34 +111,23 @@ class VolatilityRegimeSwitchStrategy(BaseStrategy):
         ])
         return mid + std_mult * std, mid, mid - std_mult * std
 
-    def detect(
-        self,
-        symbol: str,
-        price: float,
-        volume: float,
-        ts_ms: int,
-        prices: List[Tuple[int, float]],
-        volumes: List[Tuple[int, float]]
-    ) -> Optional[Signal]:
-
-        # Need sufficient history
-        window = self._slice_window(prices, ts_ms, 90 * 60)  # 90-minute window
-        if len(window) < 60:
+    def detect(self, context_candles: list, symbol: str) -> Optional[dict]:
+        if len(context_candles) < self.min_candles:
             return None
 
-        opens, highs, lows, closes = self._to_ohlcv(window, period_ms=300_000)
+        high   = np.array([c['high']   for c in context_candles])
+        low    = np.array([c['low']    for c in context_candles])
+        closes = np.array([c['close']  for c in context_candles])
         n = len(closes)
-        if n < 30:
-            return None
 
-        atr_vals = self._atr(highs, lows, closes, self.atr_period)
-        adx_vals = self._adx(highs, lows, closes, self.adx_period)
+        atr_vals = self._atr(high, low, closes, self.atr_period)
+        adx_vals = self._adx(high, low, closes, self.adx_period)
 
-        i = n - 1  # Current bar
+        i = n - 1
         if np.isnan(atr_vals[i]) or np.isnan(adx_vals[i]):
             return None
 
-        # ATR percentile over lookback window
+        # ATR percentile
         lookback = min(self.atr_pct_window, n)
         recent_atrs = atr_vals[max(0, i - lookback):i]
         valid_atrs  = recent_atrs[~np.isnan(recent_atrs)]
@@ -208,19 +153,23 @@ class VolatilityRegimeSwitchStrategy(BaseStrategy):
             if i < 1:
                 return None
             if e5[i] > e13[i] > e21[i] and e5[i - 1] <= e13[i - 1]:
-                return Signal(
-                    symbol=symbol, signal="BUY", strategy=self.name,
-                    confidence=0.65,
-                    details={"regime": "TRENDING", "adx": round(adx_val, 1),
-                             "atr_pct": round(atr_pct, 2)}
-                )
+                return {
+                    'signal': 'BUY',
+                    'strategy': self.name,
+                    'confidence': 0.65,
+                    'regime': 'TRENDING',
+                    'adx': round(adx_val, 1),
+                    'atr_pct': round(atr_pct, 2),
+                }
             if e5[i] < e13[i] < e21[i] and e5[i - 1] >= e13[i - 1]:
-                return Signal(
-                    symbol=symbol, signal="SELL", strategy=self.name,
-                    confidence=0.65,
-                    details={"regime": "TRENDING", "adx": round(adx_val, 1),
-                             "atr_pct": round(atr_pct, 2)}
-                )
+                return {
+                    'signal': 'SELL',
+                    'strategy': self.name,
+                    'confidence': 0.65,
+                    'regime': 'TRENDING',
+                    'adx': round(adx_val, 1),
+                    'atr_pct': round(atr_pct, 2),
+                }
 
         elif regime == "RANGING":
             bb_upper, _, bb_lower = self._bollinger(closes, 20, 2.0)
@@ -229,19 +178,23 @@ class VolatilityRegimeSwitchStrategy(BaseStrategy):
             if i < 1:
                 return None
             if closes[i] <= bb_lower[i] and closes[i - 1] > bb_lower[i - 1]:
-                return Signal(
-                    symbol=symbol, signal="BUY", strategy=self.name,
-                    confidence=0.60,
-                    details={"regime": "RANGING", "adx": round(adx_val, 1),
-                             "bb_lower": round(bb_lower[i], 6)}
-                )
+                return {
+                    'signal': 'BUY',
+                    'strategy': self.name,
+                    'confidence': 0.60,
+                    'regime': 'RANGING',
+                    'adx': round(adx_val, 1),
+                    'bb_lower': round(bb_lower[i], 6),
+                }
             if closes[i] >= bb_upper[i] and closes[i - 1] < bb_upper[i - 1]:
-                return Signal(
-                    symbol=symbol, signal="SELL", strategy=self.name,
-                    confidence=0.60,
-                    details={"regime": "RANGING", "adx": round(adx_val, 1),
-                             "bb_upper": round(bb_upper[i], 6)}
-                )
+                return {
+                    'signal': 'SELL',
+                    'strategy': self.name,
+                    'confidence': 0.60,
+                    'regime': 'RANGING',
+                    'adx': round(adx_val, 1),
+                    'bb_upper': round(bb_upper[i], 6),
+                }
 
         return None
 

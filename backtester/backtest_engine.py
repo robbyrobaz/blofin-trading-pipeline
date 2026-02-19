@@ -105,16 +105,27 @@ class BacktestEngine:
         start_ts = int((datetime.now() - timedelta(days=self.days_back)).timestamp() * 1000)
         
         # Query ticks
-        query = '''
-            SELECT ts_ms, price
-            FROM ticks
-            WHERE symbol = ? AND ts_ms >= ? AND ts_ms <= ?
-            ORDER BY ts_ms ASC
-        '''
+        # When limit_rows is set, fetch the MOST RECENT N rows (DESC) then reverse
+        # to get chronological order. Without limit, fetch all in ASC order.
         if self.limit_rows:
-            query += f' LIMIT {self.limit_rows}'
-        
-        cur = con.execute(query, (self.symbol, start_ts, end_ts))
+            query = '''
+                SELECT ts_ms, price FROM (
+                    SELECT ts_ms, price
+                    FROM ticks
+                    WHERE symbol = ? AND ts_ms >= ? AND ts_ms <= ?
+                    ORDER BY ts_ms DESC
+                    LIMIT ?
+                ) ORDER BY ts_ms ASC
+            '''
+            cur = con.execute(query, (self.symbol, start_ts, end_ts, self.limit_rows))
+        else:
+            query = '''
+                SELECT ts_ms, price
+                FROM ticks
+                WHERE symbol = ? AND ts_ms >= ? AND ts_ms <= ?
+                ORDER BY ts_ms ASC
+            '''
+            cur = con.execute(query, (self.symbol, start_ts, end_ts))
         
         ticks = [dict(row) for row in cur.fetchall()]
         con.close()
@@ -174,8 +185,17 @@ class BacktestEngine:
         for i, candle in enumerate(candles):
             # Check if we have an open position
             if open_position:
-                # Check stop loss
-                if stop_loss_pct and candle['low'] <= open_position['stop_loss']:
+                # Check stop loss — direction depends on side
+                # LONG: stop is below entry, triggers when candle LOW drops to it
+                # SHORT: stop is above entry, triggers when candle HIGH rises to it
+                sl_hit = False
+                if stop_loss_pct:
+                    if open_position['side'] == 'LONG' and candle['low'] <= open_position['stop_loss']:
+                        sl_hit = True
+                    elif open_position['side'] == 'SHORT' and candle['high'] >= open_position['stop_loss']:
+                        sl_hit = True
+
+                if sl_hit:
                     # Stop loss hit
                     exit_price = open_position['stop_loss']
                     pnl_pct = ((exit_price - open_position['entry_price']) / open_position['entry_price']) * 100
@@ -197,8 +217,17 @@ class BacktestEngine:
                     open_position = None
                     continue
                 
-                # Check take profit
-                if take_profit_pct and candle['high'] >= open_position['take_profit']:
+                # Check take profit — direction depends on side
+                # LONG: TP is above entry, triggers when candle HIGH reaches it
+                # SHORT: TP is below entry, triggers when candle LOW drops to it
+                tp_hit = False
+                if take_profit_pct:
+                    if open_position['side'] == 'LONG' and candle['high'] >= open_position['take_profit']:
+                        tp_hit = True
+                    elif open_position['side'] == 'SHORT' and candle['low'] <= open_position['take_profit']:
+                        tp_hit = True
+
+                if tp_hit:
                     # Take profit hit
                     exit_price = open_position['take_profit']
                     pnl_pct = ((exit_price - open_position['entry_price']) / open_position['entry_price']) * 100
@@ -236,6 +265,11 @@ class BacktestEngine:
                 # Open new position
                 entry_price = candle['close']
                 side = signal.get('signal', 'BUY').upper()
+                # Normalize strategy signal values to canonical LONG/SHORT
+                if side == 'BUY':
+                    side = 'LONG'
+                elif side == 'SELL':
+                    side = 'SHORT'
                 
                 open_position = {
                     'entry_ts': candle['ts_ms'],
@@ -247,13 +281,15 @@ class BacktestEngine:
             
             elif signal and open_position:
                 # Exit signal received
-                signal_type = signal.get('signal', '').upper()
+                raw_signal = signal.get('signal', '').upper()
+                # Normalize BUY/SELL to LONG/SHORT for comparison
+                signal_type = 'LONG' if raw_signal == 'BUY' else ('SHORT' if raw_signal == 'SELL' else raw_signal)
                 
                 # Check if opposite signal (exit)
                 should_exit = False
-                if open_position['side'] == 'LONG' and signal_type == 'SELL':
+                if open_position['side'] == 'LONG' and signal_type == 'SHORT':
                     should_exit = True
-                elif open_position['side'] == 'SHORT' and signal_type == 'BUY':
+                elif open_position['side'] == 'SHORT' and signal_type == 'LONG':
                     should_exit = True
                 
                 if should_exit:

@@ -1,163 +1,102 @@
 #!/usr/bin/env python3
 """
-Orderflow Imbalance Strategy
+Orderflow Imbalance Strategy — candle-based interface.
 
-Uses tick direction (uptick vs downtick) as a proxy for buy/sell orderflow.
-Aggregates tick pressure over rolling windows and signals when imbalance
-exceeds a threshold.
+Uses candle close direction as a proxy for buy/sell orderflow pressure.
+An "up-candle" (close > prev_close) is treated as buy pressure;
+a "down-candle" (close < prev_close) as sell pressure.
 
-Note: Blofin data has no explicit trade side (buy/sell). We infer direction
-from consecutive tick price changes: uptick (+) vs downtick (-).
-
-Reference: new_strategies_backtest.py → strategy_orderflow_imbalance
+When the ratio of up-candles exceeds the imbalance threshold over a
+lookback window, signals BUY (and vice versa for SELL).
 """
-
 import os
-import numpy as np
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any
 
-from .base_strategy import BaseStrategy, Signal
+from .base_strategy import BaseStrategy
 
 
 class OrderflowImbalanceStrategy(BaseStrategy):
-    """
-    Tick-direction orderflow pressure strategy.
-
-    For each time window in the price history:
-      - Count price-up ticks (upticks) vs price-down ticks (downticks)
-      - Compute uptick ratio = upticks / (upticks + downticks)
-      - Signal when ratio exceeds imbalance_threshold (buy pressure)
-        or falls below (1 - threshold) (sell pressure)
-
-    Additional confirmation: current window confirms sustained direction.
-    """
+    """Candle-direction orderflow pressure imbalance strategy."""
 
     name = "orderflow_imbalance"
-    version = "1.0"
-    description = "Tick-direction buy/sell pressure imbalance"
+    version = "2.0"
+    description = "Candle close-direction buy/sell pressure imbalance (candle-based)"
 
     def __init__(self):
-        # Main pressure window (seconds)
-        self.pressure_window_s = int(os.getenv("OFI_PRESSURE_WINDOW_S", "300"))  # 5 min
-        # Confirmation window (shorter, more recent)
-        self.confirm_window_s  = int(os.getenv("OFI_CONFIRM_WINDOW_S", "60"))   # 1 min
-        # Imbalance threshold (e.g. 0.65 = 65% must be upticks)
+        self.pressure_window = int(os.getenv("OFI_PRESSURE_WINDOW", "20"))
+        self.confirm_window  = int(os.getenv("OFI_CONFIRM_WINDOW", "5"))
         self.imbalance_threshold = float(os.getenv("OFI_IMBALANCE_THRESHOLD", "0.65"))
-        # Minimum tick count for reliable signal
-        self.min_ticks = int(os.getenv("OFI_MIN_TICKS", "20"))
-        # Cooldown: minimum seconds between signals per symbol
-        self.cooldown_s = int(os.getenv("OFI_COOLDOWN_S", "120"))
-        self._last_signal_ts: Dict[str, int] = {}
+        self.min_candles = 10
 
-    def _compute_tick_pressure(
-        self,
-        prices: List[Tuple[int, float]],
-        window_end_ts: int,
-        lookback_s: int
-    ) -> Tuple[float, int]:
-        """
-        Compute uptick ratio and tick count for a lookback window.
-        Returns (uptick_ratio, tick_count).
-        """
-        window = self._slice_window(prices, window_end_ts, lookback_s)
-        if len(window) < 2:
-            return 0.5, 0
-
-        prices_in_window = [p for _, p in window]
-        upticks   = 0
+    def _uptick_ratio(self, candles: list) -> tuple:
+        """Return (uptick_ratio, total_directional_candles) for a candle list."""
+        upticks = 0
         downticks = 0
-        for i in range(1, len(prices_in_window)):
-            diff = prices_in_window[i] - prices_in_window[i - 1]
+        for i in range(1, len(candles)):
+            diff = candles[i]['close'] - candles[i - 1]['close']
             if diff > 0:
                 upticks += 1
             elif diff < 0:
                 downticks += 1
-
         total = upticks + downticks
         if total == 0:
             return 0.5, 0
-
         return upticks / total, total
 
-    def detect(
-        self,
-        symbol: str,
-        price: float,
-        volume: float,
-        ts_ms: int,
-        prices: List[Tuple[int, float]],
-        volumes: List[Tuple[int, float]]
-    ) -> Optional[Signal]:
-
-        if len(prices) < self.min_ticks:
+    def detect(self, context_candles: list, symbol: str) -> Optional[dict]:
+        if len(context_candles) < self.min_candles:
             return None
 
-        # Check cooldown
-        last_ts = self._last_signal_ts.get(symbol, 0)
-        if ts_ms - last_ts < self.cooldown_s * 1000:
+        # Main pressure window
+        main_window = context_candles[-self.pressure_window - 1:]
+        main_ratio, main_count = self._uptick_ratio(main_window)
+        if main_count < 5:
             return None
 
-        # Compute pressure over main window
-        main_ratio, main_ticks = self._compute_tick_pressure(
-            prices, ts_ms, self.pressure_window_s
-        )
-        if main_ticks < self.min_ticks:
+        # Confirmation window (most recent candles)
+        confirm_window = context_candles[-self.confirm_window - 1:]
+        confirm_ratio, confirm_count = self._uptick_ratio(confirm_window)
+        if confirm_count < 2:
             return None
 
-        # Compute pressure over confirmation (recent) window
-        confirm_ratio, confirm_ticks = self._compute_tick_pressure(
-            prices, ts_ms, self.confirm_window_s
-        )
-        if confirm_ticks < 5:
-            return None
+        is_buy  = (main_ratio >= self.imbalance_threshold and confirm_ratio >= 0.55)
+        is_sell = (main_ratio <= (1 - self.imbalance_threshold) and confirm_ratio <= 0.45)
 
-        is_buy_pressure  = (main_ratio >= self.imbalance_threshold and
-                            confirm_ratio >= 0.55)
-        is_sell_pressure = (main_ratio <= (1 - self.imbalance_threshold) and
-                            confirm_ratio <= 0.45)
-
-        if is_buy_pressure:
+        if is_buy:
             confidence = min(0.90, 0.50 + (main_ratio - 0.5) * 2)
-            self._last_signal_ts[symbol] = ts_ms
-            return Signal(
-                symbol=symbol, signal="BUY", strategy=self.name,
-                confidence=round(confidence, 3),
-                details={
-                    "uptick_ratio": round(main_ratio, 3),
-                    "confirm_ratio": round(confirm_ratio, 3),
-                    "main_ticks": main_ticks,
-                    "confirm_ticks": confirm_ticks,
-                }
-            )
+            return {
+                'signal': 'BUY',
+                'strategy': self.name,
+                'confidence': round(confidence, 3),
+                'uptick_ratio': round(main_ratio, 3),
+                'confirm_ratio': round(confirm_ratio, 3),
+                'main_candles': main_count,
+            }
 
-        if is_sell_pressure:
+        if is_sell:
             confidence = min(0.90, 0.50 + (0.5 - main_ratio) * 2)
-            self._last_signal_ts[symbol] = ts_ms
-            return Signal(
-                symbol=symbol, signal="SELL", strategy=self.name,
-                confidence=round(confidence, 3),
-                details={
-                    "uptick_ratio": round(main_ratio, 3),
-                    "confirm_ratio": round(confirm_ratio, 3),
-                    "main_ticks": main_ticks,
-                    "confirm_ticks": confirm_ticks,
-                }
-            )
+            return {
+                'signal': 'SELL',
+                'strategy': self.name,
+                'confidence': round(confidence, 3),
+                'uptick_ratio': round(main_ratio, 3),
+                'confirm_ratio': round(confirm_ratio, 3),
+                'main_candles': main_count,
+            }
 
         return None
 
     def get_config(self) -> Dict[str, Any]:
         return {
-            "pressure_window_s": self.pressure_window_s,
-            "confirm_window_s": self.confirm_window_s,
-            "imbalance_threshold": self.imbalance_threshold,
-            "min_ticks": self.min_ticks,
-            "cooldown_s": self.cooldown_s,
+            'pressure_window': self.pressure_window,
+            'confirm_window': self.confirm_window,
+            'imbalance_threshold': self.imbalance_threshold,
         }
 
     def update_config(self, params: Dict[str, Any]) -> None:
-        for key in ("pressure_window_s", "confirm_window_s", "min_ticks", "cooldown_s"):
-            if key in params:
-                setattr(self, key, int(params[key]))
-        if "imbalance_threshold" in params:
-            self.imbalance_threshold = float(params["imbalance_threshold"])
+        if 'pressure_window' in params:
+            self.pressure_window = int(params['pressure_window'])
+        if 'confirm_window' in params:
+            self.confirm_window = int(params['confirm_window'])
+        if 'imbalance_threshold' in params:
+            self.imbalance_threshold = float(params['imbalance_threshold'])

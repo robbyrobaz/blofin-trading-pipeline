@@ -15,51 +15,42 @@ class Signal:
 
 class BaseStrategy(ABC):
     """Base class for all trading strategies."""
-    
+
     name: str = "base"
     version: str = "1.0"
     description: str = "Base strategy class"
-    
+
     @abstractmethod
-    def detect(
-        self,
-        symbol: str,
-        price: float,
-        volume: float,
-        ts_ms: int,
-        prices: List[Tuple[int, float]],
-        volumes: List[Tuple[int, float]]
-    ) -> Optional[Signal]:
+    def detect(self, context_candles: list, symbol: str) -> Optional[dict]:
         """
-        Given current tick + history windows, return a signal or None.
-        
+        Given a list of OHLCV candles and the trading symbol, return a signal or None.
+
         Args:
-            symbol: Trading pair symbol
-            price: Current price
-            volume: Current volume
-            ts_ms: Current timestamp in milliseconds
-            prices: List of (timestamp_ms, price) tuples for historical data
-            volumes: List of (timestamp_ms, volume) tuples for historical data
-            
+            context_candles: List of candle dicts with keys:
+                ts_ms, open, high, low, close, volume
+            symbol: Trading pair symbol, e.g. "BTC-USDT"
+
         Returns:
-            Signal object if a signal is detected, None otherwise
+            dict with at least {'signal': 'BUY'|'SELL', 'confidence': float}
+            or None if no signal detected.
         """
         pass
-    
+
     def get_config(self) -> Dict[str, Any]:
         """Return current configurable parameters."""
         return {}
-    
+
     def update_config(self, params: Dict[str, Any]) -> None:
         """Update parameters (for AI tuning)."""
         pass
-    
+
+    # ── Legacy helper kept for backward-compat (not used by backtester) ──
     def _slice_window(
         self,
         data: List[Tuple[int, float]],
         ts_ms: int,
         lookback_seconds: int
     ) -> List[Tuple[int, float]]:
-        """Helper to slice a time-series window."""
+        """Helper to slice a time-series window (tick-era utility)."""
         cutoff = ts_ms - (lookback_seconds * 1000)
         return [(t, v) for (t, v) in data if t >= cutoff]

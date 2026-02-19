@@ -572,9 +572,11 @@ def phase2_backtest_tier0(
             continue
 
         # Stage 2: Full backtest (passed smoke test — strategy generates signals)
-        log.info("  %s passed smoke (%d trades) → full backtest …", name, smoke["total_trades"])
+        # Use 500K most-recent ticks (~50K 5m candles ≈ 174 days) for Tier 0 screening.
+        # This is far faster than loading all 36M+ raw ticks from days_back=7.
+        log.info("  %s passed smoke (%d trades) → full backtest (limit=500000 ticks) …", name, smoke["total_trades"])
         try:
-            bt = run_backtest_for_strategy(adapter)
+            bt = run_backtest_for_strategy(adapter, limit_rows=500000)
         except Exception as exc:
             log.error("  [ERROR] %s full backtest crashed: %s", name, exc)
             counts["failed"] += 1
