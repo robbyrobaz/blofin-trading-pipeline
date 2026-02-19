@@ -274,6 +274,22 @@ def fetch_summary_data():
                 entry['eep_rank'] = global_rank
             global_rank += 1
 
+        # Enrich with strategy_registry tier data
+        tier_map = {}
+        try:
+            reg_rows = con.execute('SELECT strategy_name, tier, bt_eep_score, ft_eep_score FROM strategy_registry WHERE archived=0').fetchall()
+            for rr in reg_rows:
+                tier_map[rr[0]] = {'tier': rr[1], 'bt_eep': rr[2], 'ft_eep': rr[3]}
+        except:
+            pass  # table doesn't exist yet
+
+        for entry in strategy_scores:
+            strat_name = entry['strategy'].split(' (')[0]  # strip " (SYMBOL)" suffix
+            reg = tier_map.get(strat_name, {})
+            entry['tier'] = reg.get('tier')
+            entry['bt_eep'] = reg.get('bt_eep')
+            entry['ft_eep'] = reg.get('ft_eep')
+
         # Top 10 paper trades by PnL (SQL-side sort, no Python re-sort needed)
         top_trades = [dict(r) for r in con.execute(
             f"SELECT opened_ts_iso,closed_ts_iso,symbol,side,entry_price,exit_price,status,pnl_pct "
@@ -433,6 +449,49 @@ class H(BaseHTTPRequestHandler):
             else:
                 return self.sendb(json.dumps({"error": "not generated yet"}).encode(), code=404)
 
+        if p.path == '/api/registry':
+            try:
+                registry = []
+                try:
+                    rows = con.execute('''
+                        SELECT strategy_name, tier, bt_win_rate, bt_sharpe, bt_pnl_pct, bt_max_dd,
+                               bt_trades, bt_eep_score, ft_win_rate, ft_sharpe, ft_pnl_pct, ft_max_dd,
+                               ft_trades, ft_eep_score, file_path, source, strategy_type,
+                               archived, archive_reason
+                        FROM strategy_registry
+                        WHERE archived = 0
+                        ORDER BY COALESCE(ft_eep_score, bt_eep_score, 0) DESC
+                    ''').fetchall()
+                    registry = [dict(r) for r in rows]
+                except Exception:
+                    pass  # table doesn't exist yet — graceful degradation
+                result = json.dumps({"strategies": registry, "count": len(registry)}, default=str).encode()
+                return self.sendb(result)
+            except Exception as e:
+                return self.sendb(json.dumps({"error": str(e)}).encode(), code=500)
+
+        if p.path == '/api/ml_models':
+            try:
+                rows = con.execute('''
+                    SELECT model_name, model_type, train_accuracy, test_accuracy,
+                           f1_score, precision_score, recall_score, roc_auc, archived
+                    FROM ml_model_results
+                    WHERE archived = 0
+                    ORDER BY COALESCE(test_accuracy, train_accuracy, 0) DESC
+                ''').fetchall()
+                models = []
+                for r in rows:
+                    m = dict(r)
+                    # Flag leakage: train_accuracy >= 0.95 with no test_accuracy or test matches train
+                    train_acc = m.get('train_accuracy') or 0
+                    test_acc = m.get('test_accuracy')
+                    m['leakage_suspected'] = train_acc >= 0.95 and (test_acc is None or abs(train_acc - (test_acc or 0)) < 0.05)
+                    models.append(m)
+                result = json.dumps({"models": models, "count": len(models)}, default=str).encode()
+                return self.sendb(result)
+            except Exception as e:
+                return self.sendb(json.dumps({"error": str(e)}).encode(), code=500)
+
         if p.path == '/':
             # Minimal HTML that auto-refreshes and shows staleness
             html = '''<!doctype html>
@@ -470,12 +529,17 @@ select{background:#0f172a;color:#e7ecff;border:1px solid #334155;padding:6px;bor
 <div class="card"><div class="label">Status</div><div class="value" id="status">—</div></div>
 <div class="card"><div class="label">Signals</div><div class="value" id="signals">—</div></div>
 <div class="card"><div class="label">Confirmed</div><div class="value" id="confirmed">—</div></div>
-<div class="card"><div class="label">Win Rate</div><div class="value" id="wr">—</div></div>
+<div class="card"><div class="label">Best EEP</div><div class="value" id="wr">—</div></div>
 </div>
 <div class="section">
 <h2>Top Strategies (25)</h2>
-<table><thead><tr><th data-col="eep_rank" title="EEP Rank: Entry+Exit Package score (0-100). Gate-passing strategies ranked first.">EEP#</th><th data-col="strategy">Strategy</th><th data-col="signals">Signals</th><th data-col="trades">Trades</th><th data-col="wr">Win%</th><th data-col="pnl">PnL%</th><th data-col="pf">Profit Factor</th><th data-col="eep_score" title="EEP Score 0-100: 70% entry quality (PF 30%, Sharpe 25%, DD 20%, Sortino 15%, Expectancy 10%) + 30% exit quality (MPC 25%, RR 20%, SHF 15%, BEUR 10%)">EEP Score</th><th data-col="sortino">Sortino</th><th data-col="maxdd">Max DD%</th><th data-col="gate" title="Hard gates: PF≥1.3, Sharpe≥0.8, MDD≤35%, Trades≥30, positive expectancy">Gates</th></tr></thead>
+<table><thead><tr><th data-col="eep_rank" title="EEP Rank: Entry+Exit Package score (0-100). Gate-passing strategies ranked first.">EEP#</th><th data-col="tier" title="Strategy tier: T2=Forward Test, T1=Backtest, T0=Library">Tier</th><th data-col="strategy">Strategy</th><th data-col="signals">Signals</th><th data-col="trades">Trades</th><th data-col="wr">Win%</th><th data-col="pnl">PnL%</th><th data-col="pf">Profit Factor</th><th data-col="eep_score" title="EEP Score 0-100: 70% entry quality (PF 30%, Sharpe 25%, DD 20%, Sortino 15%, Expectancy 10%) + 30% exit quality (MPC 25%, RR 20%, SHF 15%, BEUR 10%)">EEP Score</th><th data-col="sortino">Sortino</th><th data-col="maxdd">Max DD%</th><th data-col="gate" title="Hard gates: PF≥1.3, Sharpe≥0.8, MDD≤35%, Trades≥30, positive expectancy">Gates</th></tr></thead>
 <tbody id="strats"></tbody></table>
+</div>
+<div class="section">
+<h2>ML Model Status</h2>
+<table><thead><tr><th>Model</th><th>Type</th><th>Train Acc</th><th>Test Acc</th><th>F1</th><th>Status</th></tr></thead>
+<tbody id="mlmodels"></tbody></table>
 </div>
 <div class="section">
 <h2>Top 10 Paper Trades by PnL</h2>
@@ -508,7 +572,7 @@ select{background:#0f172a;color:#e7ecff;border:1px solid #334155;padding:6px;bor
 let ch=null;
 let strategyData=[];
 // Default to profitability-first sorting for quick operational triage.
-let currentSort={col:'pf',asc:false};
+let currentSort={col:'eep_score',asc:false};
 function formatAge(ms){
   const s=Math.round((Date.now()-ms)/1000);
   if(s<60)return s+'s ago';
@@ -531,6 +595,7 @@ function renderStrategies(){
     else if(col==='eep_rank')av=a.eep_rank||999,bv=b.eep_rank||999;
     else if(col==='sortino')av=a.sortino,bv=b.sortino;
     else if(col==='maxdd')av=a.max_dd,bv=b.max_dd;
+    else if(col==='tier')av=a.tier||0,bv=b.tier||0;
     else if(col==='gate')av=a.gate_pass?1:0,bv=b.gate_pass?1:0;
     if(typeof av==='string')return asc?av.localeCompare(bv):bv.localeCompare(av);
     return asc?av-bv:bv-av;
@@ -543,7 +608,10 @@ function renderStrategies(){
     const eepColor=s.score>=70?'#10b981':(s.score>=50?'#f59e0b':'#ef4444');
     const gateIcon=s.gate_pass===false?'<span title="'+(s.gate_fails||[]).join(', ')+'">⛔</span>':'✅';
     const rank=s.eep_rank||('#'+(i+1));
-    h+='<tr><td style="color:#60a5fa;font-weight:700">#'+rank+'</td><td>'+s.strategy+'</td><td>'+s.signals+'</td><td>'+s.closed_count+'</td><td>'+s.win_rate_pct+'%</td><td class="'+c+'">'+s.total_pnl_pct.toFixed(1)+'%</td><td style="color:'+pf+'">'+s.profit_factor+'</td><td style="color:'+eepColor+';font-weight:600">'+(s.score||0).toFixed(1)+'</td><td>'+s.sortino.toFixed(2)+'</td><td>'+s.max_dd.toFixed(2)+'%</td><td>'+gateIcon+'</td></tr>';
+    const tierLabel=s.tier===2?'T2':s.tier===1?'T1':'T0';
+    const tierColor=s.tier===2?'#10b981':s.tier===1?'#60a5fa':'#6b7280';
+    const borderColor=s.tier===2?'#10b981':s.tier===1?'#60a5fa':'#334155';
+    h+='<tr style="border-left:3px solid '+borderColor+'"><td style="color:#60a5fa;font-weight:700">#'+rank+'</td><td style="color:'+tierColor+';font-weight:600">'+tierLabel+'</td><td>'+s.strategy+'</td><td>'+s.signals+'</td><td>'+s.closed_count+'</td><td>'+s.win_rate_pct+'%</td><td class="'+c+'">'+s.total_pnl_pct.toFixed(1)+'%</td><td style="color:'+pf+'">'+s.profit_factor+'</td><td style="color:'+eepColor+';font-weight:600">'+(s.score||0).toFixed(1)+'</td><td>'+s.sortino.toFixed(2)+'</td><td>'+s.max_dd.toFixed(2)+'%</td><td>'+gateIcon+'</td></tr>';
   }
   document.getElementById('strats').innerHTML=h;
   document.querySelectorAll('table thead th[data-col]').forEach(th=>{
@@ -566,10 +634,16 @@ async function render(){
     document.getElementById('status').style.color=d.live_status.is_live?'#10b981':'#ef4444';
     document.getElementById('signals').textContent=d.signals_count;
     document.getElementById('confirmed').textContent=d.confirmed_count;
-    document.getElementById('wr').textContent=d.paper_stats.win_rate_pct+'%';
+    const bestEep=d.strategy_scores&&d.strategy_scores.length?Math.max(...d.strategy_scores.map(s=>s.score||0)):0;
+    document.getElementById('wr').textContent=bestEep.toFixed(1);
     
     strategyData=d.strategy_scores||[];
     renderStrategies();
+    // Fetch ML model status
+    try{
+      const mr=await fetch('/api/ml_models');
+      if(mr.ok){const md=await mr.json();let mh='';for(let m of(md.models||[])){const ta=(m.train_accuracy||0).toFixed(3);const te=m.test_accuracy!=null?m.test_accuracy.toFixed(3):'-';const f1=m.f1_score!=null?m.f1_score.toFixed(3):'-';const leak=m.leakage_suspected;const st=leak?'<span style="background:#ef4444;color:#fff;padding:2px 6px;border-radius:3px;font-size:10px">LEAKAGE</span>':'<span style="color:#10b981">OK</span>';mh+='<tr><td>'+m.model_name+'</td><td>'+m.model_type+'</td><td>'+ta+'</td><td>'+te+'</td><td>'+f1+'</td><td>'+st+'</td></tr>';}document.getElementById('mlmodels').innerHTML=mh||'<tr><td colspan="6" style="color:#94a3b8">No ML models found</td></tr>';}
+    }catch(e){}
     document.querySelectorAll('table thead th[data-col]').forEach(th=>{
       th.onclick=e=>{
         const col=th.dataset.col;
