@@ -46,7 +46,7 @@ SCREENING_SYMBOLS = ["BTC-USDT", "ETH-USDT"]
 FULL_SYMBOLS      = ["BTC-USDT", "ETH-USDT", "SOL-USDT", "DOGE-USDT", "XRP-USDT"]
 BACKTEST_SYMBOLS  = SCREENING_SYMBOLS  # default for phase2 (Tier 0 screening)
 BACKTEST_DAYS     = 7
-BACKTEST_TIMEFRAME = "5m"
+BACKTEST_TIMEFRAME = "1m"   # 1m candles closer to live tick behavior (strategies were tuned for tick data)
 
 # Tier 1 promotion gates (must ALL pass)
 GATE_MIN_TRADES   = 50
@@ -205,8 +205,29 @@ class StrategyAdapter:
                         return result
                     return {"signal": str(result)}
             except TypeError:
-                # Wrong signature – fall through to other adapters
-                pass
+                # Wrong signature — try old-style detect(symbol, price, volume, ts_ms, prices, volumes)
+                # where prices/volumes are List[Tuple[int, float]] (ts_ms, value) pairs
+                if context_candles:
+                    last = context_candles[-1]
+                    prices_tuples = [(c["ts_ms"], c["close"]) for c in context_candles]
+                    volumes_tuples = [(c["ts_ms"], c.get("volume", 0)) for c in context_candles]
+                    try:
+                        result = inst.detect(
+                            symbol,
+                            last["close"],
+                            last.get("volume", 0),
+                            last["ts_ms"],
+                            prices_tuples,
+                            volumes_tuples,
+                        )
+                        if result is not None:
+                            if hasattr(result, "signal"):
+                                return {"signal": result.signal}
+                            if isinstance(result, dict):
+                                return result
+                            return {"signal": str(result)}
+                    except Exception:
+                        return None
             except Exception:
                 return None
 
@@ -396,10 +417,14 @@ def run_backtest_for_strategy(
     adapter: StrategyAdapter,
     symbols: List[str] = BACKTEST_SYMBOLS,
     days_back: int = BACKTEST_DAYS,
+    limit_rows: int = None,
 ) -> Dict[str, Any]:
     """
     Run BacktestEngine on the given strategy across all symbols.
     Returns aggregated metrics dict.
+
+    Args:
+        limit_rows: If set, cap tick rows loaded per symbol (e.g. 5000 for smoke test)
 
     Returned keys:
         total_trades, win_rate, sharpe, pnl_pct, max_dd, eep_score,
@@ -419,6 +444,7 @@ def run_backtest_for_strategy(
                 days_back=days_back,
                 db_path=str(DB_PATH),
                 initial_capital=10_000.0,
+                limit_rows=limit_rows,
             )
             if not engine.ticks:
                 log.debug("  No ticks for %s, skipping", symbol)
@@ -531,11 +557,26 @@ def phase2_backtest_tier0(
             counts["skipped"] += 1
             continue
 
-        log.info("  Backtesting %s …", name)
+        # Stage 1: Smoke test with 5000 most recent rows (fast screening)
+        log.info("  Smoke-testing %s (5000 rows) …", name)
+        try:
+            smoke = run_backtest_for_strategy(adapter, symbols=["BTC-USDT"], limit_rows=5000)
+        except Exception as exc:
+            log.error("  [ERROR] %s smoke test crashed: %s", name, exc)
+            counts["failed"] += 1
+            continue
+
+        if smoke["total_trades"] == 0:
+            log.info("  %s: 0 trades in smoke test → skip full backtest, stays tier 0", name)
+            counts["failed"] += 1
+            continue
+
+        # Stage 2: Full backtest (passed smoke test — strategy generates signals)
+        log.info("  %s passed smoke (%d trades) → full backtest …", name, smoke["total_trades"])
         try:
             bt = run_backtest_for_strategy(adapter)
         except Exception as exc:
-            log.error("  [ERROR] %s backtest crashed: %s", name, exc)
+            log.error("  [ERROR] %s full backtest crashed: %s", name, exc)
             counts["failed"] += 1
             continue
 
